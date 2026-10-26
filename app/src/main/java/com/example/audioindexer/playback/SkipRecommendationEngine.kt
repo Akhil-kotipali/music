@@ -187,7 +187,7 @@ class SkipRecommendationEngine(
     }
 
     private fun recordPlay(playlistId: Long, song: Song) {
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             val existing = playlistDao.getSongMap(playlistId, song.id)
             if (existing != null) {
                 playlistDao.updateMap(
@@ -240,7 +240,7 @@ class SkipRecommendationEngine(
      * deletes song from playlist map and notifies user via Toast.
      */
     private fun recordSkipAndCheckPrune(playlistId: Long, song: Song) {
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             val existing = playlistDao.getSongMap(playlistId, song.id)
             val currentPlays = existing?.playCount ?: 0
             val currentSkips = (existing?.skipCount ?: 0) + 1
