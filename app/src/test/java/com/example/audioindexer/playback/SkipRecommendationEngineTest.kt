@@ -3,7 +3,6 @@ package com.example.audioindexer.playback
 import com.example.audioindexer.data.dao.PlaylistDao
 import com.example.audioindexer.data.model.Playlist
 import com.example.audioindexer.data.model.PlaylistSongMap
-import com.example.audioindexer.data.model.PlaylistWithSongs
 import com.example.audioindexer.data.model.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,32 +38,35 @@ class SkipRecommendationEngineTest {
         val deletedFromPlaylist = mutableListOf<Pair<Long, Long>>()
 
         override fun getAllPlaylists(): Flow<List<Playlist>> = emptyFlow()
-        override suspend fun getAllPlaylistsDirect(): List<Playlist> = emptyList()
         override suspend fun getPlaylistById(id: Long): Playlist = Playlist(id = id, name = "Workout Hits")
         override suspend fun insertPlaylist(playlist: Playlist): Long = playlist.id
-        override suspend fun updatePlaylist(playlist: Playlist) {}
         override suspend fun deletePlaylist(playlist: Playlist) {}
-        override suspend fun deletePlaylistById(id: Long) {}
+
+        override suspend fun getSongMap(playlistId: Long, songId: Long): PlaylistSongMap? {
+            return maps[Pair(playlistId, songId)]
+        }
+        override fun getMapsForPlaylist(playlistId: Long): Flow<List<PlaylistSongMap>> = emptyFlow()
         override suspend fun insertMap(map: PlaylistSongMap): Long {
             maps[Pair(map.playlistId, map.songId)] = map
             return 1L
         }
-        override suspend fun insertMaps(maps: List<PlaylistSongMap>) {}
+        override suspend fun insertAllMaps(maps: List<PlaylistSongMap>): List<Long> = emptyList()
         override suspend fun updateMap(map: PlaylistSongMap) {
             maps[Pair(map.playlistId, map.songId)] = map
         }
-        override suspend fun deleteSongFromPlaylist(playlistId: Long, songId: Long) {
+        override suspend fun incrementPlayCount(playlistId: Long, songId: Long, timestamp: Long) {}
+        override suspend fun incrementSkipCount(playlistId: Long, songId: Long, timestamp: Long) {}
+        override suspend fun deleteSongFromPlaylist(playlistId: Long, songId: Long): Int {
             maps.remove(Pair(playlistId, songId))
             deletedFromPlaylist.add(Pair(playlistId, songId))
+            return 1
         }
-        override suspend fun getSongMap(playlistId: Long, songId: Long): PlaylistSongMap? {
-            return maps[Pair(playlistId, songId)]
-        }
-        override suspend fun getSongsForPlaylistDirect(playlistId: Long): List<Song> = emptyList()
         override fun getSongsForPlaylist(playlistId: Long): Flow<List<Song>> = emptyFlow()
-        override suspend fun getPlaylistsWithSongsDirect(): List<PlaylistWithSongs> = emptyList()
-        override fun getPlaylistsWithSongs(): Flow<List<PlaylistWithSongs>> = emptyFlow()
+        override suspend fun getSongsForPlaylistDirect(playlistId: Long): List<Song> = emptyList()
+        override fun getSongCountForPlaylist(playlistId: Long): Flow<Int> = emptyFlow()
         override suspend fun getSongCountForPlaylistDirect(playlistId: Long): Int = maps.size
+        override suspend fun clearPlaylistSongs(playlistId: Long) {}
+        override fun getPlaylistCount(): Flow<Int> = emptyFlow()
     }
 
     @Test
