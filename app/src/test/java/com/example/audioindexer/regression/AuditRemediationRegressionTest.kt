@@ -129,6 +129,7 @@ class AuditRemediationRegressionTest {
         private var nextId = 1L
 
         override fun getAllStagedSongs(): Flow<List<StagedSong>> = emptyFlow()
+        override suspend fun getAllStagedSongsDirect(): List<StagedSong> = staged.values.toList()
         override suspend fun getStagedSongByPath(filePath: String): StagedSong? = staged.values.find { it.filePath == filePath }
         override suspend fun getAllStagedFilePaths(): List<String> = staged.values.map { it.filePath }
         override fun getStagedCount(): Flow<Int> = emptyFlow()
