@@ -2,6 +2,7 @@ package com.example.audioindexer.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,9 +28,12 @@ import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import android.widget.Toast
+import com.example.audioindexer.ui.components.PlaylistsTab
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -44,6 +48,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -123,6 +128,27 @@ fun MainScreen(
     val musicSongCount by viewModel.musicSongCount.collectAsState()
     val nonMusicCount by viewModel.nonMusicCount.collectAsState()
 
+    // Playlist States
+    val playlists by viewModel.playlists.collectAsState()
+    val selectedPlaylist by viewModel.selectedPlaylist.collectAsState()
+    val selectedPlaylistSongs by viewModel.selectedPlaylistSongs.collectAsState()
+    val playlistSongCounts by viewModel.playlistSongCounts.collectAsState()
+
+    // Live Models & UX States
+    val liveModels by viewModel.liveModels.collectAsState()
+    val isFetchingModels by viewModel.isFetchingModels.collectAsState()
+    val modelFetchError by viewModel.modelFetchError.collectAsState()
+    val sleepTimerRemainingSec by viewModel.sleepTimerSecondsRemaining.collectAsState()
+    val currentSoundPreset by viewModel.currentSoundPreset.collectAsState()
+    val userNotification by viewModel.userNotification.collectAsState()
+
+    androidx.compose.runtime.LaunchedEffect(userNotification) {
+        userNotification?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearNotification()
+        }
+    }
+
     var selectedTabIndex by remember { mutableIntStateOf(0) }
 
     Scaffold(
@@ -201,7 +227,7 @@ fun MainScreen(
                 )
             }
 
-            // Scrollable Tab Row with 4 feature tabs
+            // Scrollable Tab Row with 5 feature tabs
             ScrollableTabRow(
                 selectedTabIndex = selectedTabIndex,
                 containerColor = MaterialTheme.colorScheme.surface,
@@ -224,6 +250,18 @@ fun MainScreen(
                 Tab(
                     selected = selectedTabIndex == 1,
                     onClick = { selectedTabIndex = 1 },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.QueueMusic, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Playlists (${playlists.size})")
+                        }
+                    }
+                )
+
+                Tab(
+                    selected = selectedTabIndex == 2,
+                    onClick = { selectedTabIndex = 2 },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.HourglassBottom, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -250,8 +288,8 @@ fun MainScreen(
                 )
 
                 Tab(
-                    selected = selectedTabIndex == 2,
-                    onClick = { selectedTabIndex = 2 },
+                    selected = selectedTabIndex == 3,
+                    onClick = { selectedTabIndex = 3 },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -262,8 +300,8 @@ fun MainScreen(
                 )
 
                 Tab(
-                    selected = selectedTabIndex == 3,
-                    onClick = { selectedTabIndex = 3 },
+                    selected = selectedTabIndex == 4,
+                    onClick = { selectedTabIndex = 4 },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -297,7 +335,21 @@ fun MainScreen(
                     onPlaySong = { viewModel.playSong(it) },
                     onStartScanClick = { viewModel.triggerFullScan(context) }
                 )
-                1 -> StagingTab(
+                1 -> PlaylistsTab(
+                    playlists = playlists,
+                    allSongs = songs,
+                    selectedPlaylist = selectedPlaylist,
+                    selectedPlaylistSongs = selectedPlaylistSongs,
+                    playlistSongCounts = playlistSongCounts,
+                    onSelectPlaylist = { viewModel.selectPlaylist(it) },
+                    onPlayPlaylist = { viewModel.playPlaylist(it) },
+                    onPlaySongFromPlaylist = { pl, s -> viewModel.playSongFromPlaylist(pl, s) },
+                    onDeletePlaylist = { viewModel.deletePlaylist(it) },
+                    onRemoveSongFromPlaylist = { plId, sId -> viewModel.removeSongFromPlaylist(plId, sId) },
+                    onCreateCategoryPlaylist = { n, d, c, cb -> viewModel.createCategoryPlaylist(n, d, c, cb) },
+                    onCreateCustomPlaylist = { n, d, ids, cb -> viewModel.createCustomPlaylist(n, d, ids, cb) }
+                )
+                2 -> StagingTab(
                     stagedSongs = stagedSongs,
                     onPromote = { viewModel.promoteStagedSong(it) },
                     onDismiss = { viewModel.dismissStagedSong(it) },
@@ -306,7 +358,7 @@ fun MainScreen(
                     onTriggerDeltaCheck = { viewModel.triggerDeltaCheck(context) },
                     onSongClick = { viewModel.selectedStagedSong.value = it }
                 )
-                2 -> AiManagerTab(
+                3 -> AiManagerTab(
                     aiKeys = aiKeys,
                     aiLogs = aiLogs,
                     keyTestingState = keyTestingState,
@@ -317,9 +369,13 @@ fun MainScreen(
                     onDeleteKey = { viewModel.deleteKey(it) },
                     onDeleteLog = { viewModel.deleteLog(it) },
                     onClearAllLogs = { viewModel.clearAllLogs() },
-                    onExportLogs = { onDone -> viewModel.exportLogs(onDone) }
+                    onExportLogs = { onDone -> viewModel.exportLogs(onDone) },
+                    onFetchLiveModels = { p, k -> viewModel.fetchLiveModels(p, k) },
+                    liveModels = liveModels,
+                    isFetchingModels = isFetchingModels,
+                    modelFetchError = modelFetchError
                 )
-                3 -> ScannerTab(
+                4 -> ScannerTab(
                     serviceStatus = serviceStatus,
                     scanProgress = scanProgress,
                     isObserverActive = isObserverActive,
@@ -349,7 +405,7 @@ fun MainScreen(
         onPromoteStaged = { viewModel.promoteStagedSong(it) }
     )
 
-    // Full Player Modal with Fatigue Prevention Queue
+    // Full Player Modal with Fatigue Prevention Queue & Enhanced UX
     if (showFullPlayer) {
         FullPlayerDialog(
             playbackState = playbackState,
@@ -359,7 +415,14 @@ fun MainScreen(
             onSkipPrevious = { viewModel.skipPrevious() },
             onSeek = { viewModel.seekTo(it) },
             onShuffleRemaining = { viewModel.shuffleRemainingQueue() },
-            onDismiss = { viewModel.showFullPlayer.value = false }
+            onDismiss = { viewModel.showFullPlayer.value = false },
+            playbackSpeed = playbackState.playbackSpeed,
+            onSetPlaybackSpeed = { viewModel.setPlaybackSpeed(it) },
+            sleepTimerRemainingSec = sleepTimerRemainingSec,
+            onStartSleepTimer = { viewModel.startSleepTimer(it) },
+            onCancelSleepTimer = { viewModel.cancelSleepTimer() },
+            currentPreset = currentSoundPreset,
+            onSetPreset = { viewModel.setSoundPreset(it) }
         )
     }
 }

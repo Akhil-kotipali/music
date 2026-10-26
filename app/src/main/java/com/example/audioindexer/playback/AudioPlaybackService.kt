@@ -9,7 +9,9 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import android.util.Log
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -32,7 +34,8 @@ data class PlaybackState(
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
     val queueStats: FatigueQueueStats? = null,
-    val engineStatus: SkipEngineStatus? = null
+    val engineStatus: SkipEngineStatus? = null,
+    val playbackSpeed: Float = 1.0f
 )
 
 class AudioPlaybackService : MediaSessionService() {
@@ -102,6 +105,12 @@ class AudioPlaybackService : MediaSessionService() {
                     playNextInternal(isUserSkip = false)
                 }
             }
+
+            override fun onPlayerError(error: PlaybackException) {
+                Log.e("AudioPlaybackService", "ExoPlayer playback error: ${error.message}", error)
+                // Automatically recover and advance to next track in queue rather than freezing
+                playNextInternal(isUserSkip = false)
+            }
         })
 
         // Collect engine status to update playbackState flow
@@ -145,6 +154,11 @@ class AudioPlaybackService : MediaSessionService() {
                 player.play()
             }
         }
+        updateState()
+    }
+
+    fun pause() {
+        player.pause()
         updateState()
     }
 
@@ -194,7 +208,11 @@ class AudioPlaybackService : MediaSessionService() {
 
     private fun loadAndPlay(song: Song) {
         val file = File(song.filePath)
-        if (!file.exists()) return
+        if (!file.exists() || !file.canRead()) {
+            Log.w("AudioPlaybackService", "Audio file missing or unreadable: ${song.filePath}. Skipping to next track.")
+            playNextInternal(isUserSkip = false)
+            return
+        }
 
         val metadata = MediaMetadata.Builder()
             .setTitle(song.title)
@@ -214,6 +232,11 @@ class AudioPlaybackService : MediaSessionService() {
         updateState()
     }
 
+    fun setPlaybackSpeed(speed: Float) {
+        player.setPlaybackSpeed(speed)
+        updateState()
+    }
+
     fun updateState() {
         _playbackState.value = PlaybackState(
             currentSong = fatigueQueue.currentSong,
@@ -221,7 +244,8 @@ class AudioPlaybackService : MediaSessionService() {
             currentPositionMs = player.currentPosition,
             durationMs = if (player.duration > 0) player.duration else (fatigueQueue.currentSong?.durationMs ?: 0L),
             queueStats = fatigueQueue.getStats(),
-            engineStatus = skipRecommendationEngine.engineStatus.value
+            engineStatus = skipRecommendationEngine.engineStatus.value,
+            playbackSpeed = player.playbackParameters.speed
         )
     }
 

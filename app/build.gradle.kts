@@ -67,5 +67,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.security.crypto)
 
+    testImplementation("junit:junit:4.13.2")
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

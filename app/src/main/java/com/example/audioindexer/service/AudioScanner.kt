@@ -100,26 +100,28 @@ object AudioScanner {
             )
         }
 
-        val total = audioFiles.size
+        val existingPaths = songDao.getAllFilePaths().toHashSet()
+        val newAudioFiles = audioFiles.filter { !existingPaths.contains(it.absolutePath) }
+        val totalNew = newAudioFiles.size
         val songsBatch = mutableListOf<Song>()
-        var indexedCount = 0
+        var newlyIndexedCount = 0
 
-        for ((index, file) in audioFiles.withIndex()) {
+        for ((index, file) in newAudioFiles.withIndex()) {
             val meta = MetadataExtractor.extract(file)
             songsBatch.add(MetadataExtractor.toSong(meta))
 
             // Batch insert in chunks of 50 for optimal SQLite performance
-            if (songsBatch.size >= 50 || index == total - 1) {
+            if (songsBatch.size >= 50 || index == totalNew - 1) {
                 songDao.insertAll(songsBatch)
-                indexedCount += songsBatch.size
+                newlyIndexedCount += songsBatch.size
                 songsBatch.clear()
 
                 onProgress(
                     ScanProgress(
                         currentDirectory = file.parent ?: "",
                         filesScanned = index + 1,
-                        audioFound = total,
-                        message = "Indexing songs into database: $indexedCount / $total"
+                        audioFound = audioFiles.size,
+                        message = "Indexing songs into database: $newlyIndexedCount / $totalNew"
                     )
                 )
             }
@@ -127,10 +129,10 @@ object AudioScanner {
 
         onProgress(
             ScanProgress(
-                filesScanned = total,
-                audioFound = total,
+                filesScanned = audioFiles.size,
+                audioFound = audioFiles.size,
                 isFinished = true,
-                message = "Scan complete. Successfully indexed $indexedCount songs."
+                message = "Scan complete. Found ${audioFiles.size} audio files ($newlyIndexedCount new tracks indexed)."
             )
         )
 

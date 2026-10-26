@@ -512,6 +512,121 @@ class AiManager(
     }
 
     /**
+     * Queries the provider's live models endpoint in real-time using the given API key.
+     * Returns an up-to-date list of available models for that specific key.
+     */
+    suspend fun fetchRealTimeModels(provider: String, apiKey: String): List<String> = withContext(Dispatchers.IO) {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isBlank()) return@withContext emptyList()
+
+        when (provider.uppercase(Locale.ROOT)) {
+            "GEMINI" -> fetchGeminiLiveModels(cleanKey)
+            "GROQ" -> fetchGroqLiveModels(cleanKey)
+            "OPENAI" -> fetchOpenAiLiveModels(cleanKey)
+            else -> emptyList()
+        }
+    }
+
+    private fun fetchGeminiLiveModels(apiKey: String): List<String> {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+        val request = Request.Builder().url(url).get().build()
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw Exception("Failed to fetch Gemini models (HTTP ${response.code}): $responseBody")
+        }
+
+        val json = JSONObject(responseBody)
+        val modelsArray = json.optJSONArray("models") ?: return emptyList()
+        val result = mutableListOf<String>()
+
+        for (i in 0 until modelsArray.length()) {
+            val obj = modelsArray.optJSONObject(i) ?: continue
+            val methods = obj.optJSONArray("supportedGenerationMethods")
+            var supportsGenerate = false
+            if (methods != null) {
+                for (j in 0 until methods.length()) {
+                    if (methods.optString(j) == "generateContent") {
+                        supportsGenerate = true
+                        break
+                    }
+                }
+            }
+            if (supportsGenerate) {
+                val name = obj.optString("name", "")
+                val cleanName = if (name.startsWith("models/")) name.removePrefix("models/") else name
+                if (cleanName.isNotBlank() && !cleanName.contains("embedding", ignoreCase = true)) {
+                    result.add(cleanName)
+                }
+            }
+        }
+        return result.distinct().sortedWith(compareByDescending<String> { it.contains("flash") }.thenBy { it })
+    }
+
+    private fun fetchGroqLiveModels(apiKey: String): List<String> {
+        val url = "https://api.groq.com/openai/v1/models"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .get()
+            .build()
+
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw Exception("Failed to fetch Groq models (HTTP ${response.code}): $responseBody")
+        }
+
+        val json = JSONObject(responseBody)
+        val dataArray = json.optJSONArray("data") ?: return emptyList()
+        val result = mutableListOf<String>()
+
+        for (i in 0 until dataArray.length()) {
+            val obj = dataArray.optJSONObject(i) ?: continue
+            val id = obj.optString("id", "")
+            // Exclude whisper models as they are for audio transcription, not text classification
+            if (id.isNotBlank() && !id.contains("whisper", ignoreCase = true)) {
+                result.add(id)
+            }
+        }
+        return result.distinct().sorted()
+    }
+
+    private fun fetchOpenAiLiveModels(apiKey: String): List<String> {
+        val url = "https://api.openai.com/v1/models"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .get()
+            .build()
+
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw Exception("Failed to fetch OpenAI models (HTTP ${response.code}): $responseBody")
+        }
+
+        val json = JSONObject(responseBody)
+        val dataArray = json.optJSONArray("data") ?: return emptyList()
+        val result = mutableListOf<String>()
+
+        for (i in 0 until dataArray.length()) {
+            val obj = dataArray.optJSONObject(i) ?: continue
+            val id = obj.optString("id", "")
+            // Include chat/completion models (gpt-*, o1-*, o3-*, chatgpt-*)
+            if (id.startsWith("gpt-") || id.startsWith("o1-") || id.startsWith("o3-") || id.startsWith("chatgpt-")) {
+                if (!id.contains("realtime") && !id.contains("audio")) {
+                    result.add(id)
+                }
+            }
+        }
+        return result.distinct().sortedWith(compareByDescending<String> { it.startsWith("gpt-4o") }.thenBy { it })
+    }
+
+    /**
      * Executes REST call against Gemini, Groq, or OpenAI
      */
     private fun executeAiRequest(key: AiKeyConfig, prompt: String): String {

@@ -54,6 +54,9 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE ai_category = :category ORDER BY title ASC")
     fun getSongsByCategory(category: String): Flow<List<Song>>
 
+    @Query("SELECT * FROM songs WHERE ai_category = :category AND is_music = 1 ORDER BY title ASC")
+    suspend fun getSongsByCategoryDirect(category: String): List<Song>
+
     @Query("UPDATE songs SET ai_category = :category WHERE id = :id")
     suspend fun updateAiCategory(id: Long, category: String)
 
@@ -68,10 +71,10 @@ interface SongDao {
     """)
     fun searchSongs(query: String): Flow<List<Song>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(song: Song): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(songs: List<Song>): List<Long>
 
     @Update

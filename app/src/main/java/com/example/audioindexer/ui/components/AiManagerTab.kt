@@ -70,6 +70,10 @@ fun AiManagerTab(
     onDeleteLog: (id: Long) -> Unit,
     onClearAllLogs: () -> Unit,
     onExportLogs: ((File) -> Unit) -> Unit,
+    onFetchLiveModels: (provider: String, apiKey: String) -> Unit = { _, _ -> },
+    liveModels: List<String> = emptyList(),
+    isFetchingModels: Boolean = false,
+    modelFetchError: String? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -257,7 +261,11 @@ fun AiManagerTab(
     if (showAddDialog) {
         AddOrReplaceKeyDialog(
             onDismiss = { showAddDialog = false },
-            onSave = { p, l, k, m -> onAddKey(p, l, k, m) }
+            onSave = { p, l, k, m -> onAddKey(p, l, k, m) },
+            onFetchLiveModels = onFetchLiveModels,
+            liveModels = liveModels,
+            isFetchingModels = isFetchingModels,
+            modelFetchError = modelFetchError
         )
     }
 
@@ -266,7 +274,11 @@ fun AiManagerTab(
         AddOrReplaceKeyDialog(
             initialKey = keyConfig,
             onDismiss = { keyToReplace = null },
-            onSave = { p, l, k, m -> onReplaceKey(keyConfig.id, p, l, k, m) }
+            onSave = { p, l, k, m -> onReplaceKey(keyConfig.id, p, l, k, m) },
+            onFetchLiveModels = onFetchLiveModels,
+            liveModels = liveModels,
+            isFetchingModels = isFetchingModels,
+            modelFetchError = modelFetchError
         )
     }
 }

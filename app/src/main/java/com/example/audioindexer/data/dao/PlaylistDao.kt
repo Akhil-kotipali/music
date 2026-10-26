@@ -66,4 +66,16 @@ interface PlaylistDao {
         ORDER BY s.title ASC
     """)
     suspend fun getSongsForPlaylistDirect(playlistId: Long): List<Song>
+
+    @Query("SELECT COUNT(*) FROM playlist_song_map WHERE playlist_id = :playlistId")
+    fun getSongCountForPlaylist(playlistId: Long): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM playlist_song_map WHERE playlist_id = :playlistId")
+    suspend fun getSongCountForPlaylistDirect(playlistId: Long): Int
+
+    @Query("DELETE FROM playlist_song_map WHERE playlist_id = :playlistId")
+    suspend fun clearPlaylistSongs(playlistId: Long)
+
+    @Query("SELECT COUNT(*) FROM playlists")
+    fun getPlaylistCount(): Flow<Int>
 }

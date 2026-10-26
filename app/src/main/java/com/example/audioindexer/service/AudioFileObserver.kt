@@ -29,8 +29,8 @@ class AudioFileObserverManager(
 
     companion object {
         private const val TAG = "AudioFileObserver"
-        // Inotify flags to track new file arrivals
-        private const val WATCH_FLAGS = FileObserver.CREATE or FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE
+        // Inotify flags to track new file arrivals once writing is complete
+        private const val WATCH_FLAGS = FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE
     }
 
     /**

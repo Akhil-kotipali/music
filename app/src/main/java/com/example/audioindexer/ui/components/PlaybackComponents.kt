@@ -15,6 +15,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ElectricBolt
@@ -28,6 +36,8 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -237,6 +247,57 @@ fun MiniPlaybackBar(
 }
 
 @Composable
+fun AnimatedEqualizerBars(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "equalizer")
+    val h1 by infiniteTransition.animateFloat(
+        initialValue = 0.25f, targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse), label = "h1"
+    )
+    val h2 by infiniteTransition.animateFloat(
+        initialValue = 0.4f, targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(tween(310, easing = LinearEasing), RepeatMode.Reverse), label = "h2"
+    )
+    val h3 by infiniteTransition.animateFloat(
+        initialValue = 0.15f, targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(tween(540, easing = LinearEasing), RepeatMode.Reverse), label = "h3"
+    )
+    val h4 by infiniteTransition.animateFloat(
+        initialValue = 0.5f, targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(370, easing = LinearEasing), RepeatMode.Reverse), label = "h4"
+    )
+    val h5 by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(tween(480, easing = LinearEasing), RepeatMode.Reverse), label = "h5"
+    )
+    val h6 by infiniteTransition.animateFloat(
+        initialValue = 0.2f, targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(tween(390, easing = LinearEasing), RepeatMode.Reverse), label = "h6"
+    )
+
+    val list = listOf(h1, h2, h3, h4, h5, h6)
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        list.forEach { heightRatio ->
+            val scale = if (isPlaying) heightRatio else 0.2f
+            Box(
+                modifier = Modifier
+                    .width(7.dp)
+                    .height((46 * scale).coerceAtLeast(8f).dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(PrimaryCyan)
+            )
+        }
+    }
+}
+
+@Composable
 fun FullPlayerDialog(
     playbackState: PlaybackState,
     remainingQueue: List<Song>,
@@ -245,22 +306,30 @@ fun FullPlayerDialog(
     onSkipPrevious: () -> Unit,
     onSeek: (Long) -> Unit,
     onShuffleRemaining: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    playbackSpeed: Float = 1.0f,
+    onSetPlaybackSpeed: (Float) -> Unit = {},
+    sleepTimerRemainingSec: Int? = null,
+    onStartSleepTimer: (Int) -> Unit = {},
+    onCancelSleepTimer: () -> Unit = {},
+    currentPreset: String = "Balanced",
+    onSetPreset: (String) -> Unit = {}
 ) {
     val song = playbackState.currentSong ?: return
     var sliderPosition by remember(playbackState.currentPositionMs) {
         mutableFloatStateOf(playbackState.currentPositionMs.toFloat())
     }
     var isUserSeeking by remember { mutableStateOf(false) }
+    var showSleepTimerMenu by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(modifier = Modifier.padding(18.dp)) {
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -277,42 +346,51 @@ fun FullPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Big Art Visualizer Box
+                // Big Art Visualizer Box with Animated Waves
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp)
+                        .height(120.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(
                             androidx.compose.ui.graphics.Brush.verticalGradient(
-                                listOf(SecondaryViolet.copy(alpha = 0.4f), PrimaryCyan.copy(alpha = 0.2f))
+                                listOf(SecondaryViolet.copy(alpha = 0.45f), PrimaryCyan.copy(alpha = 0.2f))
                             )
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.GraphicEq,
-                        contentDescription = null,
-                        tint = PrimaryCyan,
-                        modifier = Modifier.size(56.dp)
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        AnimatedEqualizerBars(
+                            isPlaying = playbackState.isPlaying,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Text(
+                            text = if (playbackState.isPlaying) "Playing • Hi-Fi Audio Stream" else "Paused",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = PrimaryCyan
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Song Title & Artist
                 Text(
                     text = song.title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "${song.artist} • ${song.album}",
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -320,7 +398,7 @@ fun FullPlayerDialog(
 
                 // Skip Engine Status Bar
                 playbackState.engineStatus?.let { engine ->
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -333,7 +411,7 @@ fun FullPlayerDialog(
                                     EngineStateMode.NORMAL -> DarkSurfaceBorder.copy(alpha = 0.4f)
                                 }
                             )
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -350,12 +428,12 @@ fun FullPlayerDialog(
                                     EngineStateMode.SHORT_TERM_PIVOT -> AccentOrange
                                     EngineStateMode.NORMAL -> AccentGreen
                                 },
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = engine.lastActionDescription,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -364,7 +442,7 @@ fun FullPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Seek Slider
                 val duration = if (playbackState.durationMs > 0) playbackState.durationMs.toFloat() else 1f
@@ -402,8 +480,6 @@ fun FullPlayerDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
                 // Standard Playback Controls
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -414,24 +490,24 @@ fun FullPlayerDialog(
                         Icon(Icons.Default.Shuffle, contentDescription = "Shuffle", tint = MaterialTheme.colorScheme.onSurface)
                     }
 
-                    IconButton(onClick = onSkipPrevious, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(32.dp))
+                    IconButton(onClick = onSkipPrevious, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(30.dp))
                     }
 
                     FilledIconButton(
                         onClick = onTogglePlayPause,
-                        modifier = Modifier.size(56.dp),
+                        modifier = Modifier.size(52.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = PrimaryCyan, contentColor = Color.Black)
                     ) {
                         Icon(
                             imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                            modifier = Modifier.size(34.dp)
+                            modifier = Modifier.size(30.dp)
                         )
                     }
 
-                    IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.SkipNext, contentDescription = "Next (Hard skip if <15s)", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(32.dp))
+                    IconButton(onClick = onSkipNext, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(30.dp))
                     }
 
                     IconButton(onClick = { }) {
@@ -439,7 +515,154 @@ fun FullPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Playback Speed Chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Speed",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { spd ->
+                            val isSelected = (playbackSpeed == spd)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) PrimaryCyan else DarkSurfaceBorder.copy(alpha = 0.4f))
+                                    .clickable { onSetPlaybackSpeed(spd) }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "${spd}x",
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Sleep Timer & Audio Preset Controls
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Sleep Timer Chip
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (sleepTimerRemainingSec != null) AccentOrange.copy(alpha = 0.2f) else DarkSurfaceBorder.copy(alpha = 0.4f))
+                            .border(1.dp, if (sleepTimerRemainingSec != null) AccentOrange else DarkSurfaceBorder, RoundedCornerShape(8.dp))
+                            .clickable { showSleepTimerMenu = true }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Timer,
+                                contentDescription = "Timer",
+                                tint = if (sleepTimerRemainingSec != null) AccentOrange else PrimaryCyan,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (sleepTimerRemainingSec != null) {
+                                    val m = sleepTimerRemainingSec / 60
+                                    val s = sleepTimerRemainingSec % 60
+                                    "${m}:${s.toString().padStart(2, '0')}"
+                                } else "Sleep Timer",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    // Sound EQ Preset Chip (cycle presets on click)
+                    val presets = listOf("Balanced", "Bass Boost", "Vocal Clear", "Treble Boost")
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SecondaryViolet.copy(alpha = 0.2f))
+                            .border(1.dp, SecondaryViolet.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .clickable {
+                                val nextIdx = (presets.indexOf(currentPreset) + 1) % presets.size
+                                onSetPreset(presets[nextIdx])
+                            }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Tune, contentDescription = "EQ", tint = SecondaryViolet, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = currentPreset,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                // Sleep Timer Selector Popup
+                if (showSleepTimerMenu) {
+                    Dialog(onDismissRequest = { showSleepTimerMenu = false }) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "Set Sleep Timer",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                listOf(15, 30, 45, 60).forEach { mins ->
+                                    Button(
+                                        onClick = {
+                                            onStartSleepTimer(mins)
+                                            showSleepTimerMenu = false
+                                        },
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("$mins minutes")
+                                    }
+                                }
+                                if (sleepTimerRemainingSec != null) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            onCancelSleepTimer()
+                                            showSleepTimerMenu = false
+                                        },
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Turn Off Sleep Timer", color = AccentOrange)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Fatigue Prevention Queue Overview
                 playbackState.queueStats?.let { stats ->
@@ -448,7 +671,7 @@ fun FullPlayerDialog(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = DarkSurfaceBorder.copy(alpha = 0.35f))
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
+                        Column(modifier = Modifier.padding(8.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -456,13 +679,13 @@ fun FullPlayerDialog(
                             ) {
                                 Text(
                                     text = "Fatigue Prevention Queue",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AccentGreen
                                 )
                                 Text(
                                     text = "Cycle ${stats.cycleNumber}",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = PrimaryCyan
                                 )

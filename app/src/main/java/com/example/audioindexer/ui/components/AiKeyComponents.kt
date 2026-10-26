@@ -244,58 +244,72 @@ fun AiKeyCard(
 fun AddOrReplaceKeyDialog(
     initialKey: AiKeyConfig? = null,
     onDismiss: () -> Unit,
-    onSave: (provider: String, label: String, apiKey: String, model: String) -> Unit
+    onSave: (provider: String, label: String, apiKey: String, model: String) -> Unit,
+    onFetchLiveModels: (provider: String, apiKey: String) -> Unit = { _, _ -> },
+    liveModels: List<String> = emptyList(),
+    isFetchingModels: Boolean = false,
+    modelFetchError: String? = null
 ) {
     var provider by remember { mutableStateOf(initialKey?.provider ?: "GEMINI") }
     var label by remember { mutableStateOf(initialKey?.label ?: "") }
     var apiKey by remember { mutableStateOf(initialKey?.apiKey ?: "") }
-    var model by remember { mutableStateOf(initialKey?.model ?: "") }
-    var isExpanded by remember { mutableStateOf(false) }
+    var model by remember { 
+        mutableStateOf(initialKey?.model ?: (AiProvider.fromString(initialKey?.provider ?: "GEMINI")?.defaultModel ?: "gemini-1.5-flash")) 
+    }
+    var isProviderExpanded by remember { mutableStateOf(false) }
+    var isModelExpanded by remember { mutableStateOf(false) }
 
     val providers = listOf(
-        AiProvider.GEMINI to "Google Gemini (gemini-1.5-flash)",
-        AiProvider.GROQ to "Groq (llama-3.3-70b-versatile)",
-        AiProvider.OPENAI to "OpenAI (gpt-4o-mini)"
+        AiProvider.GEMINI to "Google Gemini",
+        AiProvider.GROQ to "Groq Cloud",
+        AiProvider.OPENAI to "OpenAI"
     )
+
+    // When liveModels update, if current model not in list or blank, select first one
+    androidx.compose.runtime.LaunchedEffect(liveModels) {
+        if (liveModels.isNotEmpty() && (model.isBlank() || !liveModels.contains(model))) {
+            model = liveModels.first()
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(modifier = Modifier.padding(18.dp)) {
                 Text(
                     text = if (initialKey != null) "Replace API Key" else "Add AI Provider Key",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Configure Gemini, Groq, or OpenAI keys with rate-limit failover.",
+                    text = "Real-time model discovery for Gemini, Groq, and OpenAI.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Provider Dropdown
                 ExposedDropdownMenuBox(
-                    expanded = isExpanded,
-                    onExpandedChange = { isExpanded = it }
+                    expanded = isProviderExpanded,
+                    onExpandedChange = { isProviderExpanded = it }
                 ) {
                     OutlinedTextField(
                         value = providers.firstOrNull { it.first.name == provider }?.second ?: provider,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Provider") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isExpanded) },
+                        label = { Text("AI Provider") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isProviderExpanded) },
                         modifier = Modifier.fillMaxWidth().menuAnchor(),
                         shape = RoundedCornerShape(10.dp)
                     )
                     ExposedDropdownMenu(
-                        expanded = isExpanded,
-                        onDismissRequest = { isExpanded = false }
+                        expanded = isProviderExpanded,
+                        onDismissRequest = { isProviderExpanded = false }
                     ) {
                         for ((p, title) in providers) {
                             DropdownMenuItem(
@@ -304,25 +318,25 @@ fun AddOrReplaceKeyDialog(
                                     provider = p.name
                                     model = p.defaultModel
                                     if (label.isBlank()) label = "${p.displayName} Key"
-                                    isExpanded = false
+                                    isProviderExpanded = false
                                 }
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
                     label = { Text("Key Label / Alias") },
-                    placeholder = { Text("e.g. Primary Gemini Key") },
+                    placeholder = { Text("e.g. Production Key") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedTextField(
                     value = apiKey,
@@ -332,6 +346,91 @@ fun AddOrReplaceKeyDialog(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Live Model Discovery Section
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Available Models (${if (liveModels.isNotEmpty()) "${liveModels.size} live" else "default"})",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = PrimaryCyan
+                    )
+
+                    OutlinedButton(
+                        onClick = { onFetchLiveModels(provider, apiKey.trim()) },
+                        enabled = apiKey.isNotBlank() && !isFetchingModels,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        if (isFetchingModels) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Querying...", fontSize = 11.sp)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "Fetch", modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Query Live Models", fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                if (modelFetchError != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "⚠️ $modelFetchError",
+                        fontSize = 11.sp,
+                        color = AccentOrange
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                if (liveModels.isNotEmpty()) {
+                    // Show dropdown with genuine live models from API
+                    ExposedDropdownMenuBox(
+                        expanded = isModelExpanded,
+                        onExpandedChange = { isModelExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = model,
+                            onValueChange = { model = it },
+                            label = { Text("Selected Live Model") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isModelExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = isModelExpanded,
+                            onDismissRequest = { isModelExpanded = false }
+                        ) {
+                            for (m in liveModels) {
+                                DropdownMenuItem(
+                                    text = { Text(m, fontSize = 13.sp) },
+                                    onClick = {
+                                        model = m
+                                        isModelExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Editable model field
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        label = { Text("Model Name") },
+                        placeholder = { Text("Enter or select model") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
@@ -351,7 +450,7 @@ fun AddOrReplaceKeyDialog(
                     Button(
                         onClick = {
                             if (apiKey.isNotBlank()) {
-                                onSave(provider, label.ifBlank { "$provider Key" }, apiKey.trim(), model)
+                                onSave(provider, label.ifBlank { "$provider Key" }, apiKey.trim(), model.ifBlank { "default" })
                                 onDismiss()
                             }
                         },
