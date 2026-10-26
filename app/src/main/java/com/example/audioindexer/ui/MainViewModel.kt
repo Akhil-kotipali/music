@@ -21,6 +21,7 @@ import com.example.audioindexer.service.ScanProgress
 import com.example.audioindexer.service.ServiceStatus
 import com.example.audioindexer.service.ai.AiManager
 import com.example.audioindexer.service.ai.KeyHealthResult
+import com.example.audioindexer.util.KeyEncryptionHelper
 import com.example.audioindexer.util.PermissionUtils
 import com.example.audioindexer.util.StorageUtils
 import com.example.audioindexer.util.StorageVolumeInfo
@@ -241,11 +242,12 @@ class MainViewModel(
 
     fun addOrUpdateKey(provider: String, label: String, apiKey: String, model: String, existingId: Long? = null) {
         viewModelScope.launch {
+            val encryptedKey = KeyEncryptionHelper.encrypt(apiKey.trim())
             val config = AiKeyConfig(
                 id = existingId ?: 0,
                 provider = provider,
                 label = label,
-                apiKey = apiKey,
+                apiKey = encryptedKey,
                 model = model,
                 isActive = true
             )

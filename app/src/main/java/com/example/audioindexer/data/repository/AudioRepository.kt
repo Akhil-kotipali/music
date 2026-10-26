@@ -1,7 +1,9 @@
 package com.example.audioindexer.data.repository
 
+import androidx.room.withTransaction
 import com.example.audioindexer.data.dao.SongDao
 import com.example.audioindexer.data.dao.StagedSongDao
+import com.example.audioindexer.data.db.AudioDatabase
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.data.model.StagedSong
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 class AudioRepository(
+    private val database: AudioDatabase? = null,
     private val songDao: SongDao,
     private val stagedSongDao: StagedSongDao
 ) {
@@ -46,8 +49,9 @@ class AudioRepository(
     }
 
     /**
-     * Promotes a staged track into the main songs index.
-     * Extracts full processing, saves to songs table, and cleans up staging entry.
+     * Atomically promotes a staged track into the main songs index.
+     * Inserts into songs and deletes from staged_songs within an atomic Room transaction
+     * to eliminate state discrepancies and orphan records.
      */
     suspend fun promoteStagedSong(stagedSong: StagedSong): Boolean = withContext(Dispatchers.IO) {
         val song = Song(
@@ -64,22 +68,59 @@ class AudioRepository(
             extension = stagedSong.extension,
             dateAdded = System.currentTimeMillis()
         )
-        songDao.insert(song)
-        stagedSongDao.delete(stagedSong)
+
+        if (database != null) {
+            database.withTransaction {
+                songDao.insert(song)
+                stagedSongDao.delete(stagedSong)
+            }
+        } else {
+            songDao.insert(song)
+            stagedSongDao.delete(stagedSong)
+        }
         true
     }
 
     /**
-     * Batch promotes all staged songs into the main library.
+     * Atomically batch promotes all staged songs into the main library.
+     * Enclosed in an atomic transaction to ensure all-or-nothing consistency.
      */
     suspend fun promoteAllStaged(): Int = withContext(Dispatchers.IO) {
         val stagedList = stagedSongDao.getAllStagedFilePaths()
         var promotedCount = 0
-        for (path in stagedList) {
-            val staged = stagedSongDao.getStagedSongByPath(path)
-            if (staged != null) {
-                promoteStagedSong(staged)
-                promotedCount++
+
+        if (database != null) {
+            database.withTransaction {
+                for (path in stagedList) {
+                    val staged = stagedSongDao.getStagedSongByPath(path)
+                    if (staged != null) {
+                        val song = Song(
+                            filePath = staged.filePath,
+                            title = staged.title,
+                            artist = staged.artist,
+                            album = staged.album,
+                            lyricsSnippet = staged.lyricsSnippet ?: "Lyrics snippet: [${staged.title}] - not yet parsed.",
+                            aiCategory = staged.aiCategory,
+                            isMusic = staged.isMusic,
+                            audioType = staged.audioType,
+                            durationMs = staged.durationMs,
+                            fileSize = staged.fileSize,
+                            extension = staged.extension,
+                            dateAdded = System.currentTimeMillis()
+                        )
+                        songDao.insert(song)
+                        stagedSongDao.delete(staged)
+                        promotedCount++
+                    }
+                }
+            }
+        } else {
+            for (path in stagedList) {
+                val staged = stagedSongDao.getStagedSongByPath(path)
+                if (staged != null) {
+                    promoteStagedSong(staged)
+                    promotedCount++
+                }
             }
         }
         promotedCount

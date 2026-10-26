@@ -9,6 +9,7 @@ import com.example.audioindexer.data.model.AiLog
 import com.example.audioindexer.data.model.AiProvider
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.service.AudioSnippetExtractor
+import com.example.audioindexer.util.KeyEncryptionHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -516,7 +517,7 @@ class AiManager(
      * Returns an up-to-date list of available models for that specific key.
      */
     suspend fun fetchRealTimeModels(provider: String, apiKey: String): List<String> = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.trim()
+        val cleanKey = KeyEncryptionHelper.decrypt(apiKey.trim())
         if (cleanKey.isBlank()) return@withContext emptyList()
 
         when (provider.uppercase(Locale.ROOT)) {
@@ -630,10 +631,11 @@ class AiManager(
      * Executes REST call against Gemini, Groq, or OpenAI
      */
     private fun executeAiRequest(key: AiKeyConfig, prompt: String): String {
-        return when (key.provider.uppercase(Locale.ROOT)) {
-            "GEMINI" -> callGemini(key, prompt)
-            "GROQ" -> callGroq(key, prompt)
-            "OPENAI" -> callOpenAi(key, prompt)
+        val decryptedKey = key.copy(apiKey = KeyEncryptionHelper.decrypt(key.apiKey))
+        return when (decryptedKey.provider.uppercase(Locale.ROOT)) {
+            "GEMINI" -> callGemini(decryptedKey, prompt)
+            "GROQ" -> callGroq(decryptedKey, prompt)
+            "OPENAI" -> callOpenAi(decryptedKey, prompt)
             else -> throw IllegalArgumentException("Unknown AI provider: ${key.provider}")
         }
     }

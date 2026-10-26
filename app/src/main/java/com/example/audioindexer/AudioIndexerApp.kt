@@ -17,6 +17,7 @@ class AudioIndexerApp : Application() {
 
     val repository: AudioRepository by lazy {
         AudioRepository(
+            database = database,
             songDao = database.songDao(),
             stagedSongDao = database.stagedSongDao()
         )

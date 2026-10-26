@@ -38,7 +38,8 @@ data class AiKeyConfig(
 ) {
     val maskedKey: String
         get() {
-            if (apiKey.length <= 8) return "••••••••"
-            return apiKey.take(4) + "••••••••" + apiKey.takeLast(4)
+            val key = com.example.audioindexer.util.KeyEncryptionHelper.decrypt(apiKey)
+            if (key.length <= 8) return "••••••••"
+            return key.take(4) + "••••••••" + key.takeLast(4)
         }
 }

@@ -1,6 +1,7 @@
 package com.example.audioindexer.service
 
 import android.content.Context
+import android.provider.MediaStore
 import com.example.audioindexer.data.db.AudioDatabase
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.data.model.StagedSong
@@ -22,15 +23,72 @@ data class ScanProgress(
 object AudioScanner {
 
     /**
-     * Recursively collects all audio files (.mp3, .wav, .m4a) from all detected storage volumes.
+     * Discovers audio files using Android's system MediaStore indexed audio provider.
+     * This provides normal music discovery across all shared device storage on Android 10, 11, 12, 13, 14, 15
+     * without requiring MANAGE_EXTERNAL_STORAGE.
+     */
+    fun queryMediaStoreAudio(context: Context): List<File> {
+        val audioFiles = mutableListOf<File>()
+        try {
+            val projection = arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.DATA
+            )
+            val selection = "${MediaStore.Audio.Media.DATA} LIKE '%.mp3' OR " +
+                    "${MediaStore.Audio.Media.DATA} LIKE '%.wav' OR " +
+                    "${MediaStore.Audio.Media.DATA} LIKE '%.m4a'"
+
+            val cursor = context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+            )
+
+            cursor?.use { c ->
+                val dataColumn = c.getColumnIndex(MediaStore.Audio.Media.DATA)
+                while (c.moveToNext()) {
+                    if (dataColumn != -1) {
+                        val path = c.getString(dataColumn)
+                        if (!path.isNullOrBlank()) {
+                            val file = File(path)
+                            if (StorageUtils.isAudioFile(file) && file.exists() && file.canRead()) {
+                                audioFiles.add(file)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Graceful fallback for test or restricted environments
+        }
+        return audioFiles
+    }
+
+    /**
+     * Discovers audio files (.mp3, .wav, .m4a) across:
+     * 1. Android MediaStore indexed audio provider (shared internal & external audio).
+     * 2. Iterative filesystem traversal across all accessible storage volumes (including removable SD cards).
+     * Duplicates are automatically eliminated.
      */
     fun findAudioFiles(
         context: Context,
         onDirectoryVisited: ((String, Int) -> Unit)? = null
     ): List<File> {
-        val audioFiles = mutableListOf<File>()
+        val seenMap = LinkedHashMap<String, File>()
+
+        // 1. First, harvest all indexed audio from Android MediaStore
+        val mediaStoreFiles = queryMediaStoreAudio(context)
+        for (f in mediaStoreFiles) {
+            val canonicalOrAbs = try { f.canonicalPath } catch (_: Exception) { f.absolutePath }
+            seenMap[canonicalOrAbs] = f
+        }
+
+        onDirectoryVisited?.invoke("Android MediaStore (Indexed Audio)", seenMap.size)
+
+        // 2. Traversal of accessible storage directories and removable SD cards
         val storageVolumes = StorageUtils.getAllStorageDirectories(context)
-        var totalAudioFound = 0
 
         for (volume in storageVolumes) {
             val rootDir = File(volume.path)
@@ -42,7 +100,7 @@ object AudioScanner {
 
             while (!directoryStack.isEmpty()) {
                 val currentDir = directoryStack.pop()
-                onDirectoryVisited?.invoke(currentDir.absolutePath, totalAudioFound)
+                onDirectoryVisited?.invoke(currentDir.absolutePath, seenMap.size)
 
                 val children = try {
                     currentDir.listFiles()
@@ -64,8 +122,10 @@ object AudioScanner {
                             }
                         } else if (child.isFile) {
                             if (StorageUtils.isAudioFile(child)) {
-                                audioFiles.add(child)
-                                totalAudioFound++
+                                val pathKey = try { child.canonicalPath } catch (_: Exception) { child.absolutePath }
+                                if (!seenMap.containsKey(pathKey)) {
+                                    seenMap[pathKey] = child
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -75,7 +135,7 @@ object AudioScanner {
             }
         }
 
-        return audioFiles
+        return seenMap.values.toList()
     }
 
     /**
