@@ -7,6 +7,7 @@ import java.io.File
 import java.util.Locale
 
 import com.example.audioindexer.util.AudioClassifier
+import com.example.audioindexer.util.StorageUtils
 
 data class AudioMetadata(
     val filePath: String,
@@ -70,7 +71,7 @@ object MetadataExtractor {
         val lyricsSnippet = "Placeholder: Lyrics for '$resolvedTitle' by $resolvedArtist (pending indexer parse)"
 
         return AudioMetadata(
-            filePath = file.absolutePath,
+            filePath = StorageUtils.getCanonicalPath(file),
             title = resolvedTitle,
             artist = resolvedArtist,
             album = resolvedAlbum,

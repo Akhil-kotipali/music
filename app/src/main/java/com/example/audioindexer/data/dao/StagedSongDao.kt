@@ -15,6 +15,9 @@ interface StagedSongDao {
     @Query("SELECT * FROM staged_songs ORDER BY detectedAt DESC")
     fun getAllStagedSongs(): Flow<List<StagedSong>>
 
+    @Query("SELECT * FROM staged_songs ORDER BY detectedAt DESC")
+    suspend fun getAllStagedSongsDirect(): List<StagedSong>
+
     @Query("SELECT * FROM staged_songs WHERE filePath = :filePath LIMIT 1")
     suspend fun getStagedSongByPath(filePath: String): StagedSong?
 

@@ -81,8 +81,8 @@ object AudioScanner {
         // 1. First, harvest all indexed audio from Android MediaStore
         val mediaStoreFiles = queryMediaStoreAudio(context)
         for (f in mediaStoreFiles) {
-            val canonicalOrAbs = try { f.canonicalPath } catch (_: Exception) { f.absolutePath }
-            seenMap[canonicalOrAbs] = f
+            val canonicalOrAbs = StorageUtils.getCanonicalPath(f)
+            seenMap[canonicalOrAbs] = File(canonicalOrAbs)
         }
 
         onDirectoryVisited?.invoke("Android MediaStore (Indexed Audio)", seenMap.size)
@@ -122,9 +122,9 @@ object AudioScanner {
                             }
                         } else if (child.isFile) {
                             if (StorageUtils.isAudioFile(child)) {
-                                val pathKey = try { child.canonicalPath } catch (_: Exception) { child.absolutePath }
+                                val pathKey = StorageUtils.getCanonicalPath(child)
                                 if (!seenMap.containsKey(pathKey)) {
-                                    seenMap[pathKey] = child
+                                    seenMap[pathKey] = File(pathKey)
                                 }
                             }
                         }
@@ -160,8 +160,11 @@ object AudioScanner {
             )
         }
 
-        val existingPaths = songDao.getAllFilePaths().toHashSet()
-        val newAudioFiles = audioFiles.filter { !existingPaths.contains(it.absolutePath) }
+        val existingPaths = songDao.getAllFilePaths().map { StorageUtils.getCanonicalPath(it) }.toHashSet()
+        val newAudioFiles = audioFiles.filter { file ->
+            val canon = StorageUtils.getCanonicalPath(file)
+            !existingPaths.contains(canon)
+        }
         val totalNew = newAudioFiles.size
         val songsBatch = mutableListOf<Song>()
         var newlyIndexedCount = 0
@@ -215,9 +218,9 @@ object AudioScanner {
 
         onProgress(ScanProgress(message = "Reading indexed tracks and checking disk deltas..."))
 
-        // Existing indexed and staged file paths
-        val existingIndexedPaths = songDao.getAllFilePaths().toHashSet()
-        val existingStagedPaths = stagedSongDao.getAllStagedFilePaths().toHashSet()
+        // Existing indexed and staged file paths (canonicalized)
+        val existingIndexedPaths = songDao.getAllFilePaths().map { StorageUtils.getCanonicalPath(it) }.toHashSet()
+        val existingStagedPaths = stagedSongDao.getAllStagedFilePaths().map { StorageUtils.getCanonicalPath(it) }.toHashSet()
 
         val diskFiles = findAudioFiles(context) { dir, count ->
             onProgress(
@@ -231,8 +234,8 @@ object AudioScanner {
 
         // Isolate ONLY the new tracks that are neither indexed nor currently staged
         val newFiles = diskFiles.filter { file ->
-            val path = file.absolutePath
-            !existingIndexedPaths.contains(path) && !existingStagedPaths.contains(path)
+            val canon = StorageUtils.getCanonicalPath(file)
+            !existingIndexedPaths.contains(canon) && !existingStagedPaths.contains(canon)
         }
 
         val newlyStagedCount = newFiles.size

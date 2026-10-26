@@ -13,6 +13,8 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.audioindexer.MainActivity
+import com.example.audioindexer.data.db.AudioDatabase
+import com.example.audioindexer.data.repository.AudioRepository
 import com.example.audioindexer.util.PermissionUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -148,6 +150,9 @@ class AudioScannerService : Service() {
                     _scanProgress.value = progress
                     updateNotification("Indexed ${progress.filesScanned} files (${progress.audioFound} audio found)")
                 }
+                val repo = AudioRepository(AudioDatabase.getDatabase(applicationContext))
+                repo.deduplicateDatabaseSongs()
+
                 _serviceStatus.value = _serviceStatus.value.copy(
                     state = ServiceStatusState.IDLE,
                     message = "Full scan complete: $count songs indexed."
@@ -179,6 +184,9 @@ class AudioScannerService : Service() {
                     _scanProgress.value = progress
                     updateNotification(progress.message)
                 }
+                val repo = AudioRepository(AudioDatabase.getDatabase(applicationContext))
+                repo.deduplicateDatabaseSongs()
+
                 _serviceStatus.value = _serviceStatus.value.copy(
                     state = ServiceStatusState.IDLE,
                     message = "Delta check complete: $newTracksCount new tracks isolated in staging."

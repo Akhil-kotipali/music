@@ -184,4 +184,25 @@ object StorageUtils {
             else -> "$bytes B"
         }
     }
+
+    /**
+     * Resolves the true canonical path of an audio file, resolving symlinks such as /sdcard
+     * to eliminate path alias duplication across Android versions.
+     */
+    fun getCanonicalPath(file: File): String {
+        return try {
+            file.canonicalPath
+        } catch (_: Exception) {
+            file.absolutePath
+        }
+    }
+
+    fun getCanonicalPath(path: String): String {
+        if (path.isBlank()) return path
+        return try {
+            File(path).canonicalPath
+        } catch (_: Exception) {
+            path
+        }
+    }
 }

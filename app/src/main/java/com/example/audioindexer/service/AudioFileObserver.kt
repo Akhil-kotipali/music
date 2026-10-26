@@ -124,20 +124,20 @@ class AudioFileObserverManager(
 
         scope.launch(Dispatchers.IO) {
             try {
-                val path = file.absolutePath
+                val canon = StorageUtils.getCanonicalPath(file)
 
                 // Check if already in main songs or already in staging table
-                val existingSong = songDao.getSongByPath(path)
-                val existingStaged = stagedDao.getStagedSongByPath(path)
+                val existingSong = songDao.getSongByPath(canon)
+                val existingStaged = stagedDao.getStagedSongByPath(canon)
 
                 if (existingSong == null && existingStaged == null) {
-                    Log.i(TAG, "New audio file isolated: $path. Holding in staging table without processing.")
+                    Log.i(TAG, "New audio file isolated: $canon. Holding in staging table without processing.")
 
                     val metadata = MetadataExtractor.extract(file)
                     val staged = MetadataExtractor.toStagedSong(metadata, source = "FILE_OBSERVER")
 
                     stagedDao.insert(staged)
-                    onNewAudioDetected?.invoke(path)
+                    onNewAudioDetected?.invoke(canon)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling file observer event for ${file.absolutePath}", e)

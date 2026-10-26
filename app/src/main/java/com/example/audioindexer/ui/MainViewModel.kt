@@ -48,6 +48,12 @@ class MainViewModel(
     private val database: com.example.audioindexer.data.db.AudioDatabase
 ) : ViewModel() {
 
+    init {
+        viewModelScope.launch {
+            repository.deduplicateDatabaseSongs()
+        }
+    }
+
     val searchQuery = MutableStateFlow("")
     val filterMusicOnly = MutableStateFlow(true)
 
@@ -282,8 +288,22 @@ class MainViewModel(
     fun startAiCategorization() {
         if (isAiCategorizing.value) return // Prevent parallel duplicate AI submissions
         viewModelScope.launch {
+            // Deduplicate first to prevent same files from being categorized repeatedly
+            repository.deduplicateDatabaseSongs()
+
             val uncategorized = database.songDao().getSongsWithoutAiCategory()
-            if (uncategorized.isEmpty()) return@launch
+            if (uncategorized.isEmpty()) {
+                showAiPrompt.value = false
+                userNotification.value = "All tracks are already categorized!"
+                return@launch
+            }
+
+            val activeKeys = database.aiKeyConfigDao().getAllActiveKeys()
+            if (activeKeys.isEmpty()) {
+                userNotification.value = "No active AI API key found. Please add a Gemini, Groq, or OpenAI key in the AI Keys tab."
+                showAiPrompt.value = false
+                return@launch
+            }
 
             isAiCategorizing.value = true
             aiProgressCurrent.value = 0
@@ -291,13 +311,23 @@ class MainViewModel(
             lastCategoryResult.value = null
 
             try {
+                var taggedCount = 0
                 aiManager.batchCategorize(uncategorized) { current, total, result ->
                     aiProgressCurrent.value = current
                     aiProgressTotal.value = total
                     result?.let {
+                        taggedCount++
                         lastCategoryResult.value = "${it.title} -> ${it.category}"
                     }
                 }
+                showAiPrompt.value = false
+                if (taggedCount > 0) {
+                    userNotification.value = "AI categorization complete: $taggedCount tracks tagged."
+                } else {
+                    userNotification.value = "AI could not tag tracks. Please check API key quota or logs in AI Keys tab."
+                }
+            } catch (e: Exception) {
+                userNotification.value = "AI categorization error: ${e.message}"
             } finally {
                 isAiCategorizing.value = false
             }
@@ -380,6 +410,7 @@ class MainViewModel(
     fun promoteStagedSong(stagedSong: StagedSong) {
         viewModelScope.launch {
             repository.promoteStagedSong(stagedSong)
+            showAiPrompt.value = true
             if (selectedStagedSong.value?.id == stagedSong.id) {
                 selectedStagedSong.value = null
             }
@@ -388,7 +419,10 @@ class MainViewModel(
 
     fun promoteAllStaged() {
         viewModelScope.launch {
-            repository.promoteAllStaged()
+            val count = repository.promoteAllStaged()
+            if (count > 0) {
+                showAiPrompt.value = true
+            }
         }
     }
 

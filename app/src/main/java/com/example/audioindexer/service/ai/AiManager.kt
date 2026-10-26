@@ -80,6 +80,111 @@ class AiManager(
                     lower.contains("prompt length") ||
                     (lower.contains("token") && (lower.contains("exceed") || lower.contains("limit") || lower.contains("maximum")))
         }
+
+        /**
+         * Parses the category response with robust matching across punctuation, hyphens, and mood synonyms.
+         */
+        fun parseCategory(rawResponse: String): String? {
+            val clean = rawResponse.trim()
+                .replace("*", "")
+                .replace("#", "")
+                .replace("\"", "")
+                .replace("'", "")
+                .replace("`", "")
+                .replace(":", " ")
+                .replace("-", " ")
+                .replace("_", " ")
+                .trim()
+                .lowercase(Locale.ROOT)
+
+            // 1. Exact canonical matches
+            if (clean == "love") return "Love"
+            if (clean == "motivational" || clean == "motivation") return "Motivational"
+            if (clean == "sad" || clean == "sadness") return "Sad"
+            if (clean == "high energy" || clean == "highenergy" || clean == "energy") return "High Energy"
+            if (clean == "relaxed" || clean == "relaxing" || clean == "relax") return "Relaxed"
+            if (clean == "focus" || clean == "focusing") return "Focus"
+
+            // 2. Direct containment of allowed categories
+            for (category in ALLOWED_CATEGORIES) {
+                if (clean.contains(category.lowercase(Locale.ROOT))) {
+                    return category
+                }
+            }
+
+            // 3. Synonym and mood heuristic mapping
+            if (clean.contains("romantic") || clean.contains("romance") || clean.contains("ballad") || clean.contains("passion") || clean.contains("affection")) return "Love"
+            if (clean.contains("motivat") || clean.contains("inspir") || clean.contains("uplift") || clean.contains("triumph") || clean.contains("courage") || clean.contains("anthem") || clean.contains("empower")) return "Motivational"
+            if (clean.contains("sad") || clean.contains("melanchol") || clean.contains("heartbreak") || clean.contains("grief") || clean.contains("sorrow") || clean.contains("gloomy") || clean.contains("depress") || clean.contains("lonely")) return "Sad"
+            if (clean.contains("high energy") || clean.contains("energetic") || clean.contains("party") || clean.contains("dance") || clean.contains("rock") || clean.contains("electronic") || clean.contains("workout") || clean.contains("upbeat") || clean.contains("hype") || clean.contains("fast")) return "High Energy"
+            if (clean.contains("relax") || clean.contains("chill") || clean.contains("calm") || clean.contains("peaceful") || clean.contains("ambient") || clean.contains("sooth") || clean.contains("acoustic") || clean.contains("lofi") || clean.contains("lo fi") || clean.contains("serene")) return "Relaxed"
+            if (clean.contains("focus") || clean.contains("study") || clean.contains("concentrat") || clean.contains("instrumental") || clean.contains("classical") || clean.contains("work") || clean.contains("meditat")) return "Focus"
+
+            return null
+        }
+
+        fun parsePartResponse(responseText: String, songs: List<Song>): Map<Long, String> {
+            val results = mutableMapOf<Long, String>()
+            val lines = responseText.lines()
+
+            for (song in songs) {
+                val id = song.id
+                var matchedCategory: String? = null
+
+                val patterns = listOf(
+                    Regex("""(?i)[*_\s]*\[\s*ID\s*:\s*$id\s*\][*_\s]*[:\-]?\s*(.+)"""),
+                    Regex("""(?i)[*_\s]*\bID\s*:?\s*$id\b[*_\s]*[:\-]?\s*(.+)"""),
+                    Regex("""(?i)[*_\s]*\b(?:Song|Track)\s*$id\b[*_\s]*[:\-]?\s*(.+)"""),
+                    Regex("""(?i)^\s*(?:#|\b)?$id[\.\)\:\-]\s*(.+)""")
+                )
+
+                for (line in lines) {
+                    for (pattern in patterns) {
+                        val match = pattern.find(line)
+                        if (match != null) {
+                            val candidate = match.groupValues[1].trim()
+                            val parsed = parseCategory(candidate)
+                            if (parsed != null) {
+                                matchedCategory = parsed
+                                break
+                            }
+                        }
+                    }
+                    if (matchedCategory != null) break
+                }
+
+                // Fallback 1: Line contains [ID: x] anywhere
+                if (matchedCategory == null) {
+                    for (line in lines) {
+                        if (line.contains("[ID: $id]", ignoreCase = true) || line.contains("ID: $id", ignoreCase = true)) {
+                            val parsed = parseCategory(line)
+                            if (parsed != null) {
+                                matchedCategory = parsed
+                                break
+                            }
+                        }
+                    }
+                }
+
+                // Fallback 2: Line contains the song's title
+                if (matchedCategory == null && song.title.isNotBlank() && song.title.length > 2) {
+                    for (line in lines) {
+                        if (line.contains(song.title, ignoreCase = true)) {
+                            val parsed = parseCategory(line)
+                            if (parsed != null) {
+                                matchedCategory = parsed
+                                break
+                            }
+                        }
+                    }
+                }
+
+                if (matchedCategory != null) {
+                    results[id] = matchedCategory
+                }
+            }
+            return results
+        }
     }
 
     /**
@@ -472,26 +577,8 @@ class AiManager(
         }
     }
 
-    private fun parsePartResponse(responseText: String, songs: List<Song>): Map<Long, String> {
-        val results = mutableMapOf<Long, String>()
-        val lines = responseText.lines()
-
-        for (song in songs) {
-            val idPattern = Regex("(?i)\\[?ID:?\\s*${song.id}\\]?[:\\s-]+([A-Za-z\\s]+)")
-            for (line in lines) {
-                val match = idPattern.find(line)
-                if (match != null) {
-                    val candidate = match.groupValues[1].trim()
-                    val parsed = parseCategory(candidate)
-                    if (parsed != null) {
-                        results[song.id] = parsed
-                        break
-                    }
-                }
-            }
-        }
-        return results
-    }
+    fun parsePartResponse(responseText: String, songs: List<Song>): Map<Long, String> =
+        Companion.parsePartResponse(responseText, songs)
 
     /**
      * Tests health and rate-limiting status of an API key
@@ -771,30 +858,7 @@ class AiManager(
         return ""
     }
 
-    /**
-     * Parses the strict category response
-     */
-    private fun parseCategory(rawResponse: String): String? {
-        val clean = rawResponse.trim()
-            .replace("*", "")
-            .replace("#", "")
-            .replace("\"", "")
-            .replace("'", "")
-            .trim()
-
-        for (category in ALLOWED_CATEGORIES) {
-            if (clean.equals(category, ignoreCase = true)) {
-                return category
-            }
-        }
-        // Substring search fallback
-        for (category in ALLOWED_CATEGORIES) {
-            if (clean.contains(category, ignoreCase = true)) {
-                return category
-            }
-        }
-        return null
-    }
+    fun parseCategory(rawResponse: String): String? = Companion.parseCategory(rawResponse)
 
     private fun resolveModel(key: AiKeyConfig): String {
         if (key.model.isNotBlank()) return key.model
