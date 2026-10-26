@@ -46,8 +46,8 @@ data class SkipEngineStatus(
  */
 class SkipRecommendationEngine(
     private val context: Context? = null,
-    private val playlistDao: PlaylistDao,
-    private val scope: CoroutineScope,
+    private val playlistDao: PlaylistDao? = null,
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined),
     private val onToastNotification: ((String) -> Unit)? = null
 ) {
     companion object {
@@ -188,16 +188,17 @@ class SkipRecommendationEngine(
 
     private fun recordPlay(playlistId: Long, song: Song) {
         scope.launch {
-            val existing = playlistDao.getSongMap(playlistId, song.id)
+            val dao = playlistDao ?: return@launch
+            val existing = dao.getSongMap(playlistId, song.id)
             if (existing != null) {
-                playlistDao.updateMap(
+                dao.updateMap(
                     existing.copy(
                         playCount = existing.playCount + 1,
                         lastPlayedAt = System.currentTimeMillis()
                     )
                 )
             } else {
-                playlistDao.insertMap(
+                dao.insertMap(
                     PlaylistSongMap(
                         playlistId = playlistId,
                         songId = song.id,
@@ -241,7 +242,8 @@ class SkipRecommendationEngine(
      */
     private fun recordSkipAndCheckPrune(playlistId: Long, song: Song) {
         scope.launch {
-            val existing = playlistDao.getSongMap(playlistId, song.id)
+            val dao = playlistDao ?: return@launch
+            val existing = dao.getSongMap(playlistId, song.id)
             val currentPlays = existing?.playCount ?: 0
             val currentSkips = (existing?.skipCount ?: 0) + 1
             val totalAppearances = currentPlays + currentSkips
@@ -249,22 +251,22 @@ class SkipRecommendationEngine(
 
             if (totalAppearances >= PRUNE_MIN_APPEARANCES && skipRatio > PRUNE_SKIP_RATIO) {
                 // Delete from playlist map
-                playlistDao.deleteSongFromPlaylist(playlistId, song.id)
-                val playlist = playlistDao.getPlaylistById(playlistId)
+                dao.deleteSongFromPlaylist(playlistId, song.id)
+                val playlist = dao.getPlaylistById(playlistId)
                 val playlistName = playlist?.name ?: "Playlist"
 
                 val percentage = (skipRatio * 100).toInt()
                 showToast("Auto-pruned '${song.title}' from $playlistName ($percentage% skip rate)")
             } else {
                 if (existing != null) {
-                    playlistDao.updateMap(
+                    dao.updateMap(
                         existing.copy(
                             skipCount = currentSkips,
                             lastPlayedAt = System.currentTimeMillis()
                         )
                     )
                 } else {
-                    playlistDao.insertMap(
+                    dao.insertMap(
                         PlaylistSongMap(
                             playlistId = playlistId,
                             songId = song.id,
