@@ -1,17 +1,21 @@
 package com.example.audioindexer.playback
 
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Binder
 import android.os.IBinder
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import android.util.Log
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -22,9 +26,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -57,6 +63,18 @@ class AudioPlaybackService : MediaSessionService() {
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
+
+    private var isReceiverRegistered = false
+    private val becomingNoisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                Log.d("AudioPlaybackService", "Audio becoming noisy (headphones/BT disconnected) -> pausing")
+                pause()
+            }
+        }
+    }
+
+    private var consecutiveMissingFileSkips = 0
 
     inner class PlaybackBinder : Binder() {
         fun getService(): AudioPlaybackService = this@AudioPlaybackService
@@ -120,6 +138,25 @@ class AudioPlaybackService : MediaSessionService() {
             }
         }
 
+        // Periodic ticker for current position when playing
+        serviceScope.launch {
+            while (isActive) {
+                if (::player.isInitialized && player.isPlaying) {
+                    updateState()
+                }
+                delay(500L)
+            }
+        }
+
+        // Register Audio Becoming Noisy BroadcastReceiver
+        try {
+            val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+            registerReceiver(becomingNoisyReceiver, filter)
+            isReceiverRegistered = true
+        } catch (e: Exception) {
+            Log.w("AudioPlaybackService", "Failed to register becoming noisy receiver: ${e.message}")
+        }
+
         val sessionActivityIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -141,6 +178,7 @@ class AudioPlaybackService : MediaSessionService() {
     fun playSongFromPlaylist(playlist: List<Song>, song: Song, playlistId: Long? = 1L) {
         currentPlaylistId = playlistId
         fatigueQueue.setPlaylist(playlist, song.id)
+        consecutiveMissingFileSkips = 0
         loadAndPlay(song)
     }
 
@@ -210,9 +248,20 @@ class AudioPlaybackService : MediaSessionService() {
         val file = File(song.filePath)
         if (!file.exists() || !file.canRead()) {
             Log.w("AudioPlaybackService", "Audio file missing or unreadable: ${song.filePath}. Skipping to next track.")
+            consecutiveMissingFileSkips++
+            val total = fatigueQueue.getStats().totalSongsInPlaylist
+            if (consecutiveMissingFileSkips >= maxOf(1, total)) {
+                Log.e("AudioPlaybackService", "All tracks in playlist are unreadable or missing. Halting playback loop safely.")
+                player.stop()
+                consecutiveMissingFileSkips = 0
+                updateState()
+                return
+            }
             playNextInternal(isUserSkip = false)
             return
         }
+
+        consecutiveMissingFileSkips = 0
 
         val metadata = MediaMetadata.Builder()
             .setTitle(song.title)
@@ -250,6 +299,12 @@ class AudioPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        if (isReceiverRegistered) {
+            try {
+                unregisterReceiver(becomingNoisyReceiver)
+            } catch (_: Exception) {}
+            isReceiverRegistered = false
+        }
         mediaSession?.run {
             player.release()
             release()

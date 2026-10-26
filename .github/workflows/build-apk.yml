@@ -2,9 +2,9 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "production-hardening" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "production-hardening" ]
   workflow_dispatch:
 
 jobs:
@@ -26,12 +26,12 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run Unit Tests and Build Debug APK with Gradle
-        run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
+      - name: Run Unit Tests and Build Debug and Release APK with Gradle
+        run: ./gradlew testDebugUnitTest assembleDebug assembleRelease --stacktrace
 
-      - name: Upload Debug APK Artifact
+      - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: app-apks
+          path: app/build/outputs/apk/**/*.apk
           retention-days: 14
