@@ -2,8 +2,12 @@ package com.example.audioindexer
 
 import android.app.Application
 import com.example.audioindexer.data.db.AudioDatabase
+import com.example.audioindexer.data.model.Playlist
 import com.example.audioindexer.data.repository.AudioRepository
 import com.example.audioindexer.service.ai.AiManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class AudioIndexerApp : Application() {
 
@@ -30,6 +34,18 @@ class AudioIndexerApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        CoroutineScope(Dispatchers.IO).launch {
+            if (database.playlistDao().getPlaylistById(1L) == null) {
+                database.playlistDao().insertPlaylist(
+                    Playlist(
+                        id = 1L,
+                        name = "Daily Mix",
+                        description = "Smart queue with skip intelligence and auto-pruning"
+                    )
+                )
+            }
+        }
     }
 
     companion object {

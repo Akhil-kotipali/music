@@ -45,7 +45,20 @@ The application features deep internal & SD card audio discovery, autonomous bac
 
 ---
 
-### 3. Room Database Storage & Scanner Architecture
+### 3. SkipRecommendationEngine & Intelligent Playlist Pruning
+- **Real-Time Hard Skip Detection**:
+  - [SkipRecommendationEngine.kt](file:///c:/Users/krish/OneDrive/Desktop/new%20app/app/src/main/java/com/example/audioindexer/playback/SkipRecommendationEngine.kt): Analyzes user skips in real-time. If 'Next' is pressed within the first 15 seconds of playback (`< 15,000ms`), it registers as a **"Hard Skip"**.
+- **Behavior 1: Short-Term Pivot**:
+  - **Single Hard Skip**: Instantly reorders remaining tracks in the current queue cycle to pivot away from that song's `ai_category` (placing matching songs at the back of the queue).
+  - **Consecutive Hard Skips (≥ 2)**: Narrows the upcoming queue aggressively to look for highly contrasted mood/genre categories (e.g., Sad ↔ High Energy/Motivational, Relaxed ↔ High Energy, Focus ↔ Love/High Energy).
+  - **Hunting Mode (4+ Rapid Skips)**: Detects when a user skips 4 or more tracks rapidly within a 20-second rolling window. Enters "Hunting Mode" (assuming the user is searching for a specific song) and temporarily suspends all category penalties so recommendation metrics are not ruined.
+- **Behavior 2: Long-Term Playlist Pruning**:
+  - Tracks `skip_count` and `play_count` per playlist in Room database (`playlist_song_map` table).
+  - If a song's skip-to-play ratio exceeds 80% (`skipRatio > 0.80`) inside a specific playlist after appearing at least 5 times (`totalAppearances >= 5`), the engine automatically deletes the song from that specific playlist map and notifies the user with an Android `Toast` notification (e.g., *"Auto-pruned 'Track Title' from Daily Mix (83% skip rate)"*).
+
+---
+
+### 4. Room Database Storage & Scanner Architecture
 - **Room Database (`audio_indexer.db`)**:
   - `songs`: Production index storing `filePath` (unique), `title`, `artist`, `album`, `lyricsSnippet`, `ai_category`, duration, file size, format.
   - `staged_songs`: Isolated unprocessed tracks held by delta-checks or FileObservers.

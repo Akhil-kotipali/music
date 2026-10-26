@@ -13,20 +13,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,9 +57,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.audioindexer.data.model.Song
+import com.example.audioindexer.playback.EngineStateMode
 import com.example.audioindexer.playback.FatigueQueueStats
 import com.example.audioindexer.playback.PlaybackState
+import com.example.audioindexer.playback.SkipEngineStatus
 import com.example.audioindexer.ui.theme.AccentGreen
+import com.example.audioindexer.ui.theme.AccentOrange
+import com.example.audioindexer.ui.theme.AccentRed
 import com.example.audioindexer.ui.theme.DarkSurfaceBorder
 import com.example.audioindexer.ui.theme.PrimaryCyan
 import com.example.audioindexer.ui.theme.SecondaryViolet
@@ -85,7 +90,6 @@ fun MiniPlaybackBar(
         color = MaterialTheme.colorScheme.surface
     ) {
         Column {
-            // Seek progress line
             val progress = if (playbackState.durationMs > 0)
                 (playbackState.currentPositionMs.toFloat() / playbackState.durationMs).coerceIn(0f, 1f)
             else 0f
@@ -121,7 +125,7 @@ fun MiniPlaybackBar(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Title, Artist, & Fatigue Cycle Badge
+                // Title, Artist, & Engine Status Badge
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -148,6 +152,43 @@ fun MiniPlaybackBar(
                                 )
                             }
                         }
+
+                        // Skip Engine badge in mini player
+                        playbackState.engineStatus?.let { eng ->
+                            if (eng.mode != EngineStateMode.NORMAL) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(
+                                            when (eng.mode) {
+                                                EngineStateMode.HUNTING_MODE -> PrimaryCyan.copy(alpha = 0.2f)
+                                                EngineStateMode.CONTRASTED_FILTER -> SecondaryViolet.copy(alpha = 0.2f)
+                                                EngineStateMode.SHORT_TERM_PIVOT -> AccentOrange.copy(alpha = 0.2f)
+                                                else -> Color.Transparent
+                                            }
+                                        )
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                    ) {
+                                    Text(
+                                        text = when (eng.mode) {
+                                            EngineStateMode.HUNTING_MODE -> "HUNTING"
+                                            EngineStateMode.CONTRASTED_FILTER -> "CONTRAST"
+                                            EngineStateMode.SHORT_TERM_PIVOT -> "PIVOT"
+                                            else -> ""
+                                        },
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = when (eng.mode) {
+                                            EngineStateMode.HUNTING_MODE -> PrimaryCyan
+                                            EngineStateMode.CONTRASTED_FILTER -> SecondaryViolet
+                                            EngineStateMode.SHORT_TERM_PIVOT -> AccentOrange
+                                            else -> Color.White
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -161,7 +202,7 @@ fun MiniPlaybackBar(
                         playbackState.queueStats?.let { stats ->
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "• Fatigue Cycle ${stats.cycleNumber} (${stats.playedInCurrentCycle}/${stats.totalSongsInPlaylist})",
+                                text = "• Zero-Repeat (${stats.playedInCurrentCycle}/${stats.totalSongsInPlaylist})",
                                 fontSize = 10.sp,
                                 color = AccentGreen
                             )
@@ -236,13 +277,13 @@ fun FullPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Big Art Visualizer Box
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(160.dp)
+                        .height(140.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(
                             androidx.compose.ui.graphics.Brush.verticalGradient(
@@ -255,11 +296,11 @@ fun FullPlayerDialog(
                         imageVector = Icons.Default.GraphicEq,
                         contentDescription = null,
                         tint = PrimaryCyan,
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier.size(56.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Song Title & Artist
                 Text(
@@ -277,25 +318,53 @@ fun FullPlayerDialog(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // AI Category Pill
-                if (!song.aiCategory.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                // Skip Engine Status Bar
+                playbackState.engineStatus?.let { engine ->
+                    Spacer(modifier = Modifier.height(8.dp))
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(PrimaryCyan.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                when (engine.mode) {
+                                    EngineStateMode.HUNTING_MODE -> PrimaryCyan.copy(alpha = 0.15f)
+                                    EngineStateMode.CONTRASTED_FILTER -> SecondaryViolet.copy(alpha = 0.15f)
+                                    EngineStateMode.SHORT_TERM_PIVOT -> AccentOrange.copy(alpha = 0.15f)
+                                    EngineStateMode.NORMAL -> DarkSurfaceBorder.copy(alpha = 0.4f)
+                                }
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        Text(
-                            text = "AI Mood: ${song.aiCategory}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = PrimaryCyan
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = when (engine.mode) {
+                                    EngineStateMode.HUNTING_MODE -> Icons.Default.Search
+                                    EngineStateMode.CONTRASTED_FILTER -> Icons.Default.ElectricBolt
+                                    EngineStateMode.SHORT_TERM_PIVOT -> Icons.Default.Speed
+                                    EngineStateMode.NORMAL -> Icons.Default.MusicNote
+                                },
+                                contentDescription = null,
+                                tint = when (engine.mode) {
+                                    EngineStateMode.HUNTING_MODE -> PrimaryCyan
+                                    EngineStateMode.CONTRASTED_FILTER -> SecondaryViolet
+                                    EngineStateMode.SHORT_TERM_PIVOT -> AccentOrange
+                                    EngineStateMode.NORMAL -> AccentGreen
+                                },
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = engine.lastActionDescription,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Seek Slider
                 val duration = if (playbackState.durationMs > 0) playbackState.durationMs.toFloat() else 1f
@@ -333,7 +402,7 @@ fun FullPlayerDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Standard Playback Controls
                 Row(
@@ -362,15 +431,15 @@ fun FullPlayerDialog(
                     }
 
                     IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(32.dp))
+                        Icon(Icons.Default.SkipNext, contentDescription = "Next (Hard skip if <15s)", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(32.dp))
                     }
 
-                    IconButton(onClick = { /* loop mode */ }) {
+                    IconButton(onClick = { }) {
                         Icon(Icons.Default.Repeat, contentDescription = "Repeat", tint = AccentGreen)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Fatigue Prevention Queue Overview
                 playbackState.queueStats?.let { stats ->
@@ -399,13 +468,13 @@ fun FullPlayerDialog(
                                 )
                             }
                             Text(
-                                text = "Zero repeats until all ${stats.totalSongsInPlaylist} songs played (${stats.playedInCurrentCycle} played, ${stats.remainingInCurrentCycle} remaining).",
+                                text = "Zero repeats until all ${stats.totalSongsInPlaylist} tracks played (${stats.playedInCurrentCycle} played, ${stats.remainingInCurrentCycle} remaining).",
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
                             if (remainingQueue.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "Up next: ${remainingQueue.take(3).joinToString { it.title }}",
                                     fontSize = 10.sp,

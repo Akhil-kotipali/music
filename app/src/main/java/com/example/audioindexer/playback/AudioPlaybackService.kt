@@ -13,11 +13,17 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.example.audioindexer.AudioIndexerApp
 import com.example.audioindexer.MainActivity
 import com.example.audioindexer.data.model.Song
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
 
 data class PlaybackState(
@@ -25,7 +31,8 @@ data class PlaybackState(
     val isPlaying: Boolean = false,
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
-    val queueStats: FatigueQueueStats? = null
+    val queueStats: FatigueQueueStats? = null,
+    val engineStatus: SkipEngineStatus? = null
 )
 
 class AudioPlaybackService : MediaSessionService() {
@@ -35,6 +42,13 @@ class AudioPlaybackService : MediaSessionService() {
         private set
 
     val fatigueQueue = FatiguePreventionQueue()
+    lateinit var skipRecommendationEngine: SkipRecommendationEngine
+        private set
+
+    private var currentPlaylistId: Long? = 1L // Default playlist ID
+
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
 
     private val binder = PlaybackBinder()
 
@@ -57,6 +71,13 @@ class AudioPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
+        val app = application as AudioIndexerApp
+        skipRecommendationEngine = SkipRecommendationEngine(
+            context = applicationContext,
+            playlistDao = app.database.playlistDao(),
+            scope = serviceScope
+        )
+
         player = ExoPlayer.Builder(this)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -75,10 +96,20 @@ class AudioPlaybackService : MediaSessionService() {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateState()
                 if (playbackState == Player.STATE_ENDED) {
-                    playNext()
+                    fatigueQueue.currentSong?.let {
+                        skipRecommendationEngine.onSongCompleted(it, currentPlaylistId)
+                    }
+                    playNextInternal(isUserSkip = false)
                 }
             }
         })
+
+        // Collect engine status to update playbackState flow
+        serviceScope.launch {
+            skipRecommendationEngine.engineStatus.collect {
+                updateState()
+            }
+        }
 
         val sessionActivityIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
@@ -90,9 +121,7 @@ class AudioPlaybackService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
-            .setCallback(object : MediaSession.Callback {
-                // Default Media3 session behaviors
-            })
+            .setCallback(object : MediaSession.Callback {})
             .build()
     }
 
@@ -100,7 +129,8 @@ class AudioPlaybackService : MediaSessionService() {
         return mediaSession
     }
 
-    fun playSongFromPlaylist(playlist: List<Song>, song: Song) {
+    fun playSongFromPlaylist(playlist: List<Song>, song: Song, playlistId: Long? = 1L) {
+        currentPlaylistId = playlistId
         fatigueQueue.setPlaylist(playlist, song.id)
         loadAndPlay(song)
     }
@@ -119,6 +149,23 @@ class AudioPlaybackService : MediaSessionService() {
     }
 
     fun playNext() {
+        playNextInternal(isUserSkip = true)
+    }
+
+    private fun playNextInternal(isUserSkip: Boolean) {
+        val current = fatigueQueue.currentSong
+        if (isUserSkip && current != null) {
+            // Register skip in SkipRecommendationEngine
+            val reordered = skipRecommendationEngine.onSkipClicked(
+                currentPositionMs = player.currentPosition,
+                currentSong = current,
+                playlistId = currentPlaylistId,
+                upcomingQueue = fatigueQueue.getRemainingInCurrentCycle()
+            )
+            // Apply Short-Term Pivot or Contrasted Filter to remaining cycle queue
+            fatigueQueue.reorderRemaining(reordered)
+        }
+
         val nextSong = fatigueQueue.next()
         if (nextSong != null) {
             loadAndPlay(nextSong)
@@ -129,7 +176,6 @@ class AudioPlaybackService : MediaSessionService() {
     }
 
     fun playPrevious() {
-        // If current song played more than 3 seconds, replay it; else go back
         if (player.currentPosition > 3000L) {
             player.seekTo(0)
             updateState()
@@ -174,7 +220,8 @@ class AudioPlaybackService : MediaSessionService() {
             isPlaying = player.isPlaying,
             currentPositionMs = player.currentPosition,
             durationMs = if (player.duration > 0) player.duration else (fatigueQueue.currentSong?.durationMs ?: 0L),
-            queueStats = fatigueQueue.getStats()
+            queueStats = fatigueQueue.getStats(),
+            engineStatus = skipRecommendationEngine.engineStatus.value
         )
     }
 
@@ -184,6 +231,7 @@ class AudioPlaybackService : MediaSessionService() {
             release()
             mediaSession = null
         }
+        serviceScope.cancel()
         super.onDestroy()
     }
 }

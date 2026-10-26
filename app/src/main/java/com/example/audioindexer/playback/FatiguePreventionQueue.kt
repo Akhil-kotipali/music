@@ -150,6 +150,15 @@ class FatiguePreventionQueue {
     }
 
     @Synchronized
+    fun reorderRemaining(reordered: List<Song>) {
+        val currentSet = currentCycleQueue.map { it.id }.toSet()
+        val validReordered = reordered.filter { currentSet.contains(it.id) }
+        val remainingMissed = currentCycleQueue.filter { s -> validReordered.none { it.id == s.id } }
+        currentCycleQueue.clear()
+        currentCycleQueue.addAll(validReordered + remainingMissed)
+    }
+
+    @Synchronized
     fun getRemainingInCurrentCycle(): List<Song> = currentCycleQueue.toList()
 
     @Synchronized
