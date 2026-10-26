@@ -16,8 +16,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,12 +38,14 @@ import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.ui.theme.DarkSurfaceBorder
 import com.example.audioindexer.ui.theme.PrimaryCyan
 import com.example.audioindexer.ui.theme.SecondaryViolet
+import com.example.audioindexer.ui.theme.TertiaryAmber
 import com.example.audioindexer.util.StorageUtils
 
 @Composable
 fun SongItemCard(
     song: Song,
     onClick: () -> Unit,
+    onPlayClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -57,7 +63,7 @@ fun SongItemCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Audio icon with colored gradient background
+                // Play / Audio Icon
                 Box(
                     modifier = Modifier
                         .size(44.dp)
@@ -71,31 +77,70 @@ fun SongItemCard(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Audiotrack,
-                        contentDescription = null,
-                        tint = when (song.extension.lowercase()) {
-                            "wav" -> SecondaryViolet
-                            "m4a" -> PrimaryCyan
-                            else -> PrimaryCyan
-                        },
-                        modifier = Modifier.size(24.dp)
-                    )
+                    if (onPlayClick != null) {
+                        FilledIconButton(
+                            onClick = onPlayClick,
+                            modifier = Modifier.size(36.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = PrimaryCyan
+                            )
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(24.dp))
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Audiotrack,
+                            contentDescription = null,
+                            tint = PrimaryCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
                 // Title and Artist
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = song.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = song.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+
+                        // AI Mood / Genre Pill
+                        if (!song.aiCategory.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(SecondaryViolet.copy(alpha = 0.25f))
+                                    .border(1.dp, SecondaryViolet.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = PrimaryCyan,
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = song.aiCategory,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PrimaryCyan
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Text(
                         text = "${song.artist} • ${song.album}",
                         style = MaterialTheme.typography.bodyMedium,
@@ -105,10 +150,10 @@ fun SongItemCard(
                     )
                 }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
                 // Extension tag & duration
-                Column(
-                    horizontalAlignment = Alignment.End
-                ) {
+                Column(horizontalAlignment = Alignment.End) {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -131,7 +176,7 @@ fun SongItemCard(
                 }
             }
 
-            // Lyrics Snippet placeholder snippet preview
+            // Lyrics Snippet preview
             if (!song.lyricsSnippet.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(

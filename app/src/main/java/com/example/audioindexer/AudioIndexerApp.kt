@@ -3,6 +3,7 @@ package com.example.audioindexer
 import android.app.Application
 import com.example.audioindexer.data.db.AudioDatabase
 import com.example.audioindexer.data.repository.AudioRepository
+import com.example.audioindexer.service.ai.AiManager
 
 class AudioIndexerApp : Application() {
 
@@ -14,6 +15,15 @@ class AudioIndexerApp : Application() {
         AudioRepository(
             songDao = database.songDao(),
             stagedSongDao = database.stagedSongDao()
+        )
+    }
+
+    val aiManager: AiManager by lazy {
+        AiManager(
+            context = this,
+            keyConfigDao = database.aiKeyConfigDao(),
+            logDao = database.aiLogDao(),
+            songDao = database.songDao()
         )
     }
 

@@ -1,113 +1,132 @@
-# Audio Indexer (Android)
+# Audio Indexer & Media Player (Android)
 
-A modern Android application built with **Jetpack Compose**, **Kotlin**, **Coroutines**, and **Room Database**. It features an autonomous background foreground service capable of deep scanning internal storage and SD card directories for audio files (`.mp3`, `.wav`, `.m4a`), indexing them into a Room database `songs` table with a `lyricsSnippet` placeholder, and executing an active **FileObserver** & **Delta-Check** isolation system that captures newly added tracks into a `staged_songs` staging table without processing.
+A state-of-the-art Android application built with **Jetpack Compose**, **Kotlin Coroutines**, **Room Database**, **Media3 ExoPlayer**, and a **Multi-Provider AI Integration Manager**.
 
----
-
-## 🚀 Key Features
-
-1. **Storage-Wide Audio Discovery**:
-   - Recursively traverses all mounted **Internal Shared Storage** (`Environment.getExternalStorageDirectory()`) and removable **SD Cards** (via `StorageManager` volume discovery, `ContextCompat.getExternalFilesDirs()`, and `/storage` mount points).
-   - Filters specifically for `.mp3`, `.wav`, and `.m4a` files.
-   - Extracts ID3 metadata (Title, Artist, Album, Duration, File Size) via `android.media.MediaMetadataRetriever` with robust fallbacks.
-
-2. **Room Database Architecture**:
-   - **`songs` table**: Main production catalog storing:
-     - `filePath`: Absolute file path (unique index).
-     - `title`: Audio track title.
-     - `artist`: Artist / performer name.
-     - `album`: Album or enclosing collection.
-     - `lyricsSnippet`: Text field for lyrics previews / snippets (initialized with placeholder text).
-     - `durationMs`: Track length in milliseconds.
-     - `fileSize`: File size in bytes.
-     - `extension`: Format (`mp3`, `wav`, `m4a`).
-     - `dateAdded` & `dateModified`: Unix timestamps.
-   - **`staged_songs` table**: Staging isolation table holding newly detected tracks **without processing**.
-
-3. **Delta-Check & Real-Time FileObserver System**:
-   - **Delta-Check System**: Compares actual physical storage contents against existing records in `songs` and `staged_songs`. Newly detected files on disk are isolated and inserted into `staged_songs` as unprocessed tracks.
-   - **AudioFileObserverManager**: Listens to kernel `inotify` events (`CREATE`, `MOVED_TO`, `CLOSE_WRITE`) across standard audio directories and SD card paths. Instantly isolates incoming audio arrivals into `staged_songs` without modifying the main index.
-   - **Staging Review UI**: Allows reviewing isolated tracks, inspecting metadata/lyrics placeholders, batch promoting to the main library, or dismissing them.
-
-4. **Background Foreground Service (`AudioScannerService`)**:
-   - Executes long-running storage sweeps without getting terminated by Android's memory killer or background execution limits.
-   - Features ongoing low-priority notification with live progress counters.
-   - Connects directly to the UI via bound service interface and Kotlin `StateFlow`.
-
-5. **Permissions Architecture**:
-   - `READ_EXTERNAL_STORAGE` (for Android 12 and below).
-   - `READ_MEDIA_AUDIO` (for Android 13+ / API 33+).
-   - `MANAGE_EXTERNAL_STORAGE` ("All Files Access" on Android 11+ / API 30+) required to traverse arbitrary non-media directories and SD cards.
-   - `POST_NOTIFICATIONS` & `FOREGROUND_SERVICE_DATA_SYNC`.
-   - In-app interactive permission banner directing users straight to the system All Files Access settings activity.
-
-6. **Jetpack Compose UI (Material 3)**:
-   - Sleek dark/light theme with cyan & violet accents.
-   - **Library Tab**: Searchable catalog of indexed songs with duration and lyrics snippet preview chips.
-   - **Staging Tab**: View of isolated tracks held in staging with "Process & Index" and "Clear" actions.
-   - **Scanner Tab**: Scan controls, live progress bars, FileObserver toggle, and storage mount point diagnostics.
-   - **Song Detail Modal**: Modal inspect window showcasing all fields including `lyricsSnippet`.
+The application features deep internal & SD card audio discovery, autonomous background foreground scanning, real-time inotify **FileObserver** tracking with unprocessed track staging, an **AI Integration Manager** (Gemini, Groq, OpenAI) with automated rate-limit rotation and audit logging, and a **MediaSessionService** powered by a zero-repeat **FatiguePreventionQueue**.
 
 ---
 
-## 📂 Project Structure
+## 🚀 Key Feature Highlights
+
+### 1. Multi-Provider AI Integration Manager (Gemini, Groq, OpenAI)
+- **Multi-Provider API Support**:
+  - **Google Gemini**: Uses `gemini-1.5-flash` with direct REST calls.
+  - **Groq**: Ultra-low latency inference using `llama-3.3-70b-versatile` or `llama-3.1-8b-instant`.
+  - **OpenAI**: Supports `gpt-4o-mini` with standard bearer authentication.
+- **Key Security & Health Monitoring**:
+  - Secure local storage of API keys with masked key displays (`••••••••`).
+  - Active/Inactive toggling, manual replacement, and health check tests.
+  - **Rate-Limiting Protection (HTTP 429)**: Detects rate-limiting, flags affected keys, and automatically rotates requests to healthy fallback keys across providers.
+- **30-Second Text/Lyric Snippet Extraction**:
+  - [AudioSnippetExtractor.kt](file:///c:/Users/krish/OneDrive/Desktop/new%20app/app/src/main/java/com/example/audioindexer/service/AudioSnippetExtractor.kt): If metadata tags are missing, probes the media file via `MediaExtractor` and binary ID3 scanners across the first 30 seconds (`30,000,000` microseconds) to extract embedded synchronized/unsynchronized lyrics (`USLT`/`SYLT`) or construct a 30-second acoustic audio profile.
+- **Compose AI Categorization Prompt**:
+  - Prompt: *"New songs detected. Allow AI categorisation?"*
+  - Automatically queries the active AI provider with the strict system prompt:
+    > *"Categorize this song into exactly one primary mood/genre tag from this list: Love, Motivational, Sad, High Energy, Relaxed, Focus."*
+  - Stores the parsed tag into the Room database `songs` table under `ai_category`.
+- **AI Audit Logging & Text Export**:
+  - Logs every AI call: timestamp, provider, model, latency (ms), request prompt, response body, extracted category, and errors.
+  - Full CRUD operations in the Compose UI: view detailed prompts/responses, delete single logs, and clear history.
+  - **Export to .TXT File**: Generates formatted audit logs and launches the Android system share sheet via `FileProvider`.
+
+---
+
+### 2. ExoPlayer MediaSessionService & FatiguePreventionQueue
+- **Media3 Background Audio Playback**:
+  - [AudioPlaybackService.kt](file:///c:/Users/krish/OneDrive/Desktop/new%20app/app/src/main/java/com/example/audioindexer/playback/AudioPlaybackService.kt): Extends `androidx.media3.session.MediaSessionService` using `ExoPlayer`.
+  - Supports background playback, lock-screen controls, and system media notifications.
+- **FatiguePreventionQueue**:
+  - [FatiguePreventionQueue.kt](file:///c:/Users/krish/OneDrive/Desktop/new%20app/app/src/main/java/com/example/audioindexer/playback/FatiguePreventionQueue.kt): Shuffles playlists dynamically and maintains a historical log of played track IDs.
+  - **Zero-Repeat Rule**: Ensures **no song can be repeated or re-queued until every single song in the current playlist/queue has been played exactly once**.
+  - When all songs in a playlist have been played, it advances to Cycle 2, re-shuffles dynamically, and guarantees that the first track of the new cycle is not the last track played.
+- **Playback Controls & UI**:
+  - Floating bottom mini player with Play/Pause, Next, Previous, and Fatigue Cycle indicator (`Cycle 1: 4/12 played`).
+  - Full-screen player dialog with seek bar, waveform visualizer, AI mood badge, dynamic re-shuffle, and queue inspection.
+
+---
+
+### 3. Room Database Storage & Scanner Architecture
+- **Room Database (`audio_indexer.db`)**:
+  - `songs`: Production index storing `filePath` (unique), `title`, `artist`, `album`, `lyricsSnippet`, `ai_category`, duration, file size, format.
+  - `staged_songs`: Isolated unprocessed tracks held by delta-checks or FileObservers.
+  - `ai_keys`: Stored provider configurations, active status, rate limit status, and error counts.
+  - `ai_logs`: Audit log records for every AI API call.
+- **Delta-Check & Real-Time FileObserver**:
+  - Traverses Internal Storage (`/storage/emulated/0`) and Removable SD Cards (`/storage/XXXX-XXXX`).
+  - Filters strictly for `.mp3`, `.wav`, and `.m4a` files.
+  - Newly discovered tracks are staged in `staged_songs` without processing until user review.
+- **Permissions**:
+  - `READ_EXTERNAL_STORAGE` (API ≤ 32) & `READ_MEDIA_AUDIO` (API 33+).
+  - `MANAGE_EXTERNAL_STORAGE` (All Files Access) on Android 11+ (API 30+).
+  - `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`.
+
+---
+
+## 📂 Architecture Overview
 
 ```
 app/src/main/
 ├── AndroidManifest.xml
 ├── java/com/example/audioindexer/
-│   ├── AudioIndexerApp.kt              # Application class & DB singleton
-│   ├── MainActivity.kt                 # Compose activity & permission handlers
+│   ├── AudioIndexerApp.kt              # Application class, DB & AiManager singletons
+│   ├── MainActivity.kt                 # Compose activity & service bindings
 │   ├── data/
 │   │   ├── model/
-│   │   │   ├── Song.kt                 # 'songs' Room entity
-│   │   │   └── StagedSong.kt           # 'staged_songs' Room entity
+│   │   │   ├── Song.kt                 # 'songs' Room entity (with ai_category)
+│   │   │   ├── StagedSong.kt           # 'staged_songs' Room entity
+│   │   │   ├── AiKeyConfig.kt          # Multi-provider API keys model
+│   │   │   └── AiLog.kt                # Audit log entity with text export formatter
 │   │   ├── dao/
-│   │   │   ├── SongDao.kt              # Reactive Song queries & batch inserts
-│   │   │   └── StagedSongDao.kt        # StagedSong queries & isolation DAO
+│   │   │   ├── SongDao.kt              # Room DAO for songs & AI category queries
+│   │   │   ├── StagedSongDao.kt        # DAO for isolated staged tracks
+│   │   │   ├── AiKeyConfigDao.kt       # DAO for API key CRUD & rate limits
+│   │   │   └── AiLogDao.kt             # DAO for AI audit logs
 │   │   ├── db/
-│   │   │   └── AudioDatabase.kt        # RoomDatabase definition (version 1)
+│   │   │   └── AudioDatabase.kt        # RoomDatabase v2
 │   │   └── repository/
-│   │       └── AudioRepository.kt      # Repository coordinating data flows & promotions
+│   │       └── AudioRepository.kt      # Repository coordinating data flows
+│   ├── playback/
+│   │   ├── AudioPlaybackService.kt     # MediaSessionService with ExoPlayer
+│   │   └── FatiguePreventionQueue.kt   # Zero-repeat queue algorithm
 │   ├── service/
 │   │   ├── AudioScannerService.kt      # Foreground service for scanning & monitoring
 │   │   ├── AudioScanner.kt             # Traversal engine & delta-check algorithm
 │   │   ├── AudioFileObserver.kt        # Inotify recursive directory watcher
-│   │   └── MetadataExtractor.kt        # MediaMetadataRetriever parser & lyrics placeholder
+│   │   ├── AudioSnippetExtractor.kt    # 30-second lyric/audio frame extractor
+│   │   ├── MetadataExtractor.kt        # ID3 tags parser
+│   │   └── ai/
+│   │       └── AiManager.kt            # Gemini, Groq, OpenAI REST client & failover
 │   ├── util/
 │   │   ├── StorageUtils.kt             # Internal storage & SD card volume detector
-│   │   └── PermissionUtils.kt          # Granular & All Files Access permission helpers
+│   │   └── PermissionUtils.kt          # All Files Access permission helpers
 │   └── ui/
 │       ├── MainViewModel.kt            # Coroutine StateFlow ViewModel
-│       ├── MainScreen.kt               # Tabbed Jetpack Compose screen
-│       ├── theme/
-│       │   ├── Color.kt                # Cyan, violet, dark surface colors
-│       │   ├── Theme.kt                # Material 3 ColorScheme
-│       │   └── Type.kt                 # Typography definitions
+│       ├── MainScreen.kt               # Tabbed UI (Library, Staging, AI Manager, Scanner)
 │       └── components/
-│           ├── PermissionCard.kt       # Permission status & request triggers
-│           ├── ScanControlsCard.kt     # Full scan, delta check, observer toggles
-│           ├── StorageVolumesCard.kt   # Internal & SD Card volume info
-│           ├── SongItemCard.kt         # Card for indexed songs
-│           ├── StagedSongItemCard.kt   # Card for isolated staged tracks
-│           └── SongDetailDialog.kt     # Detailed song & lyrics snippet dialog
+│           ├── AiCategorizationDialog.kt # "New songs detected. Allow AI categorisation?"
+│           ├── AiKeyComponents.kt        # Key cards & Add/Replace dialog
+│           ├── AiLogComponents.kt        # Log cards & audit details
+│           ├── AiManagerTab.kt           # AI Keys & Logs management tab
+│           ├── PlaybackComponents.kt     # Mini player & Full player dialog
+│           ├── PermissionCard.kt         # Permissions status card
+│           ├── ScanControlsCard.kt       # Scanner controls card
+│           ├── SongItemCard.kt           # Song item card with AI mood badge
+│           └── SongDetailDialog.kt       # Full song details & lyrics dialog
 └── res/
-    ├── drawable/                       # Vector assets & icons
-    ├── mipmap-anydpi-v26/              # Adaptive launcher icons
+    ├── xml/
+    │   └── file_paths.xml              # FileProvider configuration for .txt log sharing
+    ├── drawable/
     └── values/
-        ├── strings.xml
-        ├── colors.xml
-        └── themes.xml
 ```
 
 ---
 
-## 🛠️ Build and Run
+## 🛠️ Build and Deploy
 
-To build the APK or open the project:
-1. Open the directory `new app` in **Android Studio**.
-2. Run standard Gradle assemble:
+1. Compile and build the debug APK locally:
    ```bash
    ./gradlew assembleDebug
    ```
-3. Deploy to a connected physical device or emulator running Android 8.0+ (API 26+) up to Android 15 (API 35).
+2. Or trigger GitHub Actions CI:
+   - Push to `main` branch or trigger manually via **Actions > Build Android APK > Run workflow**.
+   - Download the generated `app-debug-apk` artifact from the summary page.

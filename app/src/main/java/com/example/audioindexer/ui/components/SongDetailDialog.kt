@@ -16,11 +16,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FormatQuote
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -52,6 +52,7 @@ fun SongDetailDialog(
     song: Song?,
     stagedSong: StagedSong?,
     onDismiss: () -> Unit,
+    onPlay: ((Song) -> Unit)? = null,
     onPromoteStaged: ((StagedSong) -> Unit)? = null
 ) {
     if (song == null && stagedSong == null) return
@@ -64,6 +65,7 @@ fun SongDetailDialog(
     val fileSize = song?.fileSize ?: stagedSong?.fileSize ?: 0L
     val extension = song?.extension ?: stagedSong?.extension ?: ""
     val lyricsSnippet = song?.lyricsSnippet ?: stagedSong?.lyricsSnippet ?: ""
+    val aiCategory = song?.aiCategory ?: stagedSong?.aiCategory
     val isStaged = stagedSong != null
 
     Dialog(onDismissRequest = onDismiss) {
@@ -80,7 +82,7 @@ fun SongDetailDialog(
                     .padding(20.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                // Top header with close icon
+                // Header with close icon
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -123,6 +125,31 @@ fun SongDetailDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
+                // AI Category Pill
+                if (!aiCategory.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(SecondaryViolet.copy(alpha = 0.25f))
+                                .border(1.dp, SecondaryViolet.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = PrimaryCyan, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "AI Mood: $aiCategory",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PrimaryCyan
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Metadata specs grid
@@ -149,7 +176,7 @@ fun SongDetailDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // File Path Card
+                // File Path
                 Text(
                     text = "File Path",
                     fontSize = 12.sp,
@@ -173,7 +200,7 @@ fun SongDetailDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Lyrics Snippet Field (User requirement highlight)
+                // Lyrics Snippet
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         Icons.Default.FormatQuote,
@@ -183,7 +210,7 @@ fun SongDetailDialog(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "lyricsSnippet (Placeholder Field)",
+                        text = "30-Second Text / Lyric Snippet",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = PrimaryCyan
@@ -199,14 +226,31 @@ fun SongDetailDialog(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = lyricsSnippet.ifBlank { "Placeholder lyrics field: No lyrics snippet assigned." },
-                        fontSize = 13.sp,
+                        text = lyricsSnippet.ifBlank { "No snippet available." },
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
+                Spacer(modifier = Modifier.height(20.dp))
+
+                if (song != null && onPlay != null) {
+                    Button(
+                        onClick = {
+                            onPlay(song)
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan, contentColor = Color.Black)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Play in Fatigue Prevention Queue", fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 if (isStaged && stagedSong != null && onPromoteStaged != null) {
-                    Spacer(modifier = Modifier.height(20.dp))
                     Button(
                         onClick = {
                             onPromoteStaged(stagedSong)
@@ -214,10 +258,7 @@ fun SongDetailDialog(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = PrimaryCyan,
-                            contentColor = Color.Black
-                        )
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan, contentColor = Color.Black)
                     ) {
                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))

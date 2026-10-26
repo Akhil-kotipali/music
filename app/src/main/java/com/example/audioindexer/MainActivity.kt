@@ -1,6 +1,5 @@
 package com.example.audioindexer
 
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,7 +15,7 @@ import com.example.audioindexer.util.PermissionUtils
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels {
-        MainViewModelFactory((application as AudioIndexerApp).repository)
+        MainViewModelFactory(application as AudioIndexerApp)
     }
 
     // Launcher for standard runtime permissions (READ_EXTERNAL_STORAGE / READ_MEDIA_AUDIO / POST_NOTIFICATIONS)
@@ -37,7 +36,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        viewModel.bindService(this)
+        viewModel.bindServices(this)
 
         setContent {
             AudioIndexerTheme {
@@ -61,7 +60,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        viewModel.unbindService(this)
+        viewModel.unbindServices(this)
     }
 
     private fun requestStandardPermissions() {

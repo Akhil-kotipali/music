@@ -15,8 +15,14 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY dateAdded DESC")
     fun getAllSongs(): Flow<List<Song>>
 
+    @Query("SELECT * FROM songs ORDER BY dateAdded DESC")
+    suspend fun getAllSongsDirect(): List<Song>
+
     @Query("SELECT * FROM songs WHERE filePath = :filePath LIMIT 1")
     suspend fun getSongByPath(filePath: String): Song?
+
+    @Query("SELECT * FROM songs WHERE id = :id LIMIT 1")
+    suspend fun getSongById(id: Long): Song?
 
     @Query("SELECT filePath FROM songs")
     suspend fun getAllFilePaths(): List<String>
@@ -27,12 +33,25 @@ interface SongDao {
     @Query("SELECT COUNT(*) FROM songs")
     suspend fun getSongCountDirect(): Int
 
+    @Query("SELECT * FROM songs WHERE ai_category IS NULL OR ai_category = ''")
+    suspend fun getSongsWithoutAiCategory(): List<Song>
+
+    @Query("SELECT COUNT(*) FROM songs WHERE ai_category IS NULL OR ai_category = ''")
+    fun getUncategorizedCount(): Flow<Int>
+
+    @Query("SELECT * FROM songs WHERE ai_category = :category ORDER BY title ASC")
+    fun getSongsByCategory(category: String): Flow<List<Song>>
+
+    @Query("UPDATE songs SET ai_category = :category WHERE id = :id")
+    suspend fun updateAiCategory(id: Long, category: String)
+
     @Query("""
         SELECT * FROM songs 
         WHERE title LIKE '%' || :query || '%' 
            OR artist LIKE '%' || :query || '%' 
            OR album LIKE '%' || :query || '%' 
            OR filePath LIKE '%' || :query || '%'
+           OR ai_category LIKE '%' || :query || '%'
         ORDER BY title ASC
     """)
     fun searchSongs(query: String): Flow<List<Song>>

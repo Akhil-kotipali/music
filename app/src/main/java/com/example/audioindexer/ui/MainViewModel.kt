@@ -8,12 +8,19 @@ import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.audioindexer.AudioIndexerApp
+import com.example.audioindexer.data.model.AiKeyConfig
+import com.example.audioindexer.data.model.AiLog
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.data.model.StagedSong
 import com.example.audioindexer.data.repository.AudioRepository
+import com.example.audioindexer.playback.AudioPlaybackService
+import com.example.audioindexer.playback.PlaybackState
 import com.example.audioindexer.service.AudioScannerService
 import com.example.audioindexer.service.ScanProgress
 import com.example.audioindexer.service.ServiceStatus
+import com.example.audioindexer.service.ai.AiManager
+import com.example.audioindexer.service.ai.KeyHealthResult
 import com.example.audioindexer.util.PermissionUtils
 import com.example.audioindexer.util.StorageUtils
 import com.example.audioindexer.util.StorageVolumeInfo
@@ -25,16 +32,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(
-    private val repository: AudioRepository
+    private val repository: AudioRepository,
+    private val aiManager: AiManager,
+    private val database: com.example.audioindexer.data.db.AudioDatabase
 ) : ViewModel() {
 
-    // Search query
     val searchQuery = MutableStateFlow("")
 
-    // Filtered songs
     val songs: StateFlow<List<Song>> = searchQuery.flatMapLatest { query ->
         if (query.isBlank()) {
             repository.allSongs
@@ -43,7 +51,6 @@ class MainViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Staged songs (isolated new tracks held without processing)
     val stagedSongs: StateFlow<List<StagedSong>> = repository.allStagedSongs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -53,7 +60,27 @@ class MainViewModel(
     val stagedCount: StateFlow<Int> = repository.stagedCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    // Storage volumes
+    val uncategorizedCount: StateFlow<Int> = database.songDao().getUncategorizedCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    // AI Keys & Logs
+    val aiKeys: StateFlow<List<AiKeyConfig>> = database.aiKeyConfigDao().getAllKeys()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val aiLogs: StateFlow<List<AiLog>> = database.aiLogDao().getAllLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // AI Categorization Prompt & Progress
+    val showAiPrompt = MutableStateFlow(true)
+    val isAiCategorizing = MutableStateFlow(false)
+    val aiProgressCurrent = MutableStateFlow(0)
+    val aiProgressTotal = MutableStateFlow(0)
+    val lastCategoryResult = MutableStateFlow<String?>(null)
+
+    // Key Testing State
+    val keyTestingState = MutableStateFlow<Map<Long, String>>(emptyMap())
+
+    // Storage Volumes
     private val _storageVolumes = MutableStateFlow<List<StorageVolumeInfo>>(emptyList())
     val storageVolumes: StateFlow<List<StorageVolumeInfo>> = _storageVolumes.asStateFlow()
 
@@ -64,7 +91,7 @@ class MainViewModel(
     private val _hasReadStorage = MutableStateFlow(false)
     val hasReadStorage: StateFlow<Boolean> = _hasReadStorage.asStateFlow()
 
-    // Service state
+    // Scanner Service State
     private val _serviceStatus = MutableStateFlow(ServiceStatus())
     val serviceStatus: StateFlow<ServiceStatus> = _serviceStatus.asStateFlow()
 
@@ -74,52 +101,85 @@ class MainViewModel(
     private val _isObserverActive = MutableStateFlow(false)
     val isObserverActive: StateFlow<Boolean> = _isObserverActive.asStateFlow()
 
+    // Playback Service State
+    private val _playbackState = MutableStateFlow(PlaybackState())
+    val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
+
+    val showFullPlayer = MutableStateFlow(false)
+    val remainingQueue = MutableStateFlow<List<Song>>(emptyList())
+
     // Selected song for details modal
     val selectedSong = MutableStateFlow<Song?>(null)
     val selectedStagedSong = MutableStateFlow<StagedSong?>(null)
 
     private var scannerService: AudioScannerService? = null
-    private var isBound = false
+    private var isScannerBound = false
 
-    private val serviceConnection = object : ServiceConnection {
+    private var playbackService: AudioPlaybackService? = null
+    private var isPlaybackBound = false
+
+    private val scannerConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as? AudioScannerService.LocalBinder
             scannerService = binder?.getService()
-            isBound = true
+            isScannerBound = true
 
             scannerService?.let { s ->
-                viewModelScope.launch {
-                    s.serviceStatus.collect { _serviceStatus.value = it }
-                }
-                viewModelScope.launch {
-                    s.scanProgress.collect { _scanProgress.value = it }
-                }
-                viewModelScope.launch {
-                    s.isObserverActive.collect { _isObserverActive.value = it }
-                }
+                viewModelScope.launch { s.serviceStatus.collect { _serviceStatus.value = it } }
+                viewModelScope.launch { s.scanProgress.collect { _scanProgress.value = it } }
+                viewModelScope.launch { s.isObserverActive.collect { _isObserverActive.value = it } }
             }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             scannerService = null
-            isBound = false
+            isScannerBound = false
         }
     }
 
-    fun bindService(context: Context) {
-        if (!isBound) {
-            val intent = Intent(context, AudioScannerService::class.java)
-            context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    private val playbackConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as? AudioPlaybackService.PlaybackBinder
+            playbackService = binder?.getService()
+            isPlaybackBound = true
+
+            playbackService?.let { ps ->
+                viewModelScope.launch {
+                    ps.playbackState.collect {
+                        _playbackState.value = it
+                        remainingQueue.value = ps.fatigueQueue.getRemainingInCurrentCycle()
+                    }
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            playbackService = null
+            isPlaybackBound = false
         }
     }
 
-    fun unbindService(context: Context) {
-        if (isBound) {
-            try {
-                context.unbindService(serviceConnection)
-            } catch (ignored: Exception) {}
-            isBound = false
+    fun bindServices(context: Context) {
+        if (!isScannerBound) {
+            val scannerIntent = Intent(context, AudioScannerService::class.java)
+            context.bindService(scannerIntent, scannerConnection, Context.BIND_AUTO_CREATE)
+        }
+        if (!isPlaybackBound) {
+            val playbackIntent = Intent(context, AudioPlaybackService::class.java)
+            context.bindService(playbackIntent, playbackConnection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    fun unbindServices(context: Context) {
+        if (isScannerBound) {
+            try { context.unbindService(scannerConnection) } catch (ignored: Exception) {}
+            isScannerBound = false
             scannerService = null
+        }
+        if (isPlaybackBound) {
+            try { context.unbindService(playbackConnection) } catch (ignored: Exception) {}
+            isPlaybackBound = false
+            playbackService = null
         }
     }
 
@@ -128,6 +188,117 @@ class MainViewModel(
         _hasReadStorage.value = PermissionUtils.hasReadStoragePermission(context)
         _storageVolumes.value = StorageUtils.getAllStorageDirectories(context)
     }
+
+    // --- AI Integration Methods ---
+
+    fun addOrUpdateKey(provider: String, label: String, apiKey: String, model: String, existingId: Long? = null) {
+        viewModelScope.launch {
+            val config = AiKeyConfig(
+                id = existingId ?: 0,
+                provider = provider,
+                label = label,
+                apiKey = apiKey,
+                model = model,
+                isActive = true
+            )
+            database.aiKeyConfigDao().insert(config)
+        }
+    }
+
+    fun toggleKeyActive(id: Long, isActive: Boolean) {
+        viewModelScope.launch {
+            database.aiKeyConfigDao().updateActiveStatus(id, isActive)
+        }
+    }
+
+    fun deleteKey(id: Long) {
+        viewModelScope.launch {
+            database.aiKeyConfigDao().deleteById(id)
+        }
+    }
+
+    fun testKeyHealth(keyConfig: AiKeyConfig) {
+        viewModelScope.launch {
+            val res = aiManager.testKeyHealth(keyConfig)
+            val msg = when (res) {
+                is KeyHealthResult.Success -> res.message
+                is KeyHealthResult.RateLimited -> res.message
+                is KeyHealthResult.Error -> res.message
+            }
+            keyTestingState.value = keyTestingState.value + (keyConfig.id to msg)
+        }
+    }
+
+    fun startAiCategorization() {
+        viewModelScope.launch {
+            val uncategorized = database.songDao().getSongsWithoutAiCategory()
+            if (uncategorized.isEmpty()) return@launch
+
+            isAiCategorizing.value = true
+            aiProgressCurrent.value = 0
+            aiProgressTotal.value = uncategorized.size
+            lastCategoryResult.value = null
+
+            aiManager.batchCategorize(uncategorized) { current, total, result ->
+                aiProgressCurrent.value = current
+                aiProgressTotal.value = total
+                result?.let {
+                    lastCategoryResult.value = "${it.title} -> ${it.category}"
+                }
+            }
+
+            isAiCategorizing.value = false
+        }
+    }
+
+    fun deleteLog(id: Long) {
+        viewModelScope.launch {
+            database.aiLogDao().deleteById(id)
+        }
+    }
+
+    fun clearAllLogs() {
+        viewModelScope.launch {
+            database.aiLogDao().clearAll()
+        }
+    }
+
+    fun exportLogs(onComplete: (File) -> Unit) {
+        viewModelScope.launch {
+            val file = aiManager.exportLogsToTextFile()
+            onComplete(file)
+        }
+    }
+
+    // --- Audio Playback Methods ---
+
+    fun playSong(song: Song) {
+        val currentPlaylist = songs.value
+        playbackService?.playSongFromPlaylist(currentPlaylist, song)
+    }
+
+    fun togglePlayPause() {
+        playbackService?.togglePlayPause()
+    }
+
+    fun skipNext() {
+        playbackService?.playNext()
+    }
+
+    fun skipPrevious() {
+        playbackService?.playPrevious()
+    }
+
+    fun seekTo(positionMs: Long) {
+        playbackService?.seekTo(positionMs)
+    }
+
+    fun shuffleRemainingQueue() {
+        playbackService?.fatigueQueue?.shuffleRemaining()
+        remainingQueue.value = playbackService?.fatigueQueue?.getRemainingInCurrentCycle() ?: emptyList()
+    }
+
+    // --- Scanner Methods ---
 
     fun triggerFullScan(context: Context) {
         if (scannerService != null) {
@@ -188,19 +359,15 @@ class MainViewModel(
             repository.clearAllSongs()
         }
     }
-
-    override fun onCleared() {
-        super.onCleared()
-    }
 }
 
 class MainViewModelFactory(
-    private val repository: AudioRepository
+    private val app: AudioIndexerApp
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
-            return MainViewModel(repository) as T
+            return MainViewModel(app.repository, app.aiManager, app.database) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

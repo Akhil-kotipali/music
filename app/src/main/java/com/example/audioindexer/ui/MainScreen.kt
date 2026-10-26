@@ -20,16 +20,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,6 +43,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -62,6 +63,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.audioindexer.data.model.Song
+import com.example.audioindexer.ui.components.AiCategorizationPrompt
+import com.example.audioindexer.ui.components.AiManagerTab
+import com.example.audioindexer.ui.components.FullPlayerDialog
+import com.example.audioindexer.ui.components.MiniPlaybackBar
 import com.example.audioindexer.ui.components.PermissionCard
 import com.example.audioindexer.ui.components.ScanControlsCard
 import com.example.audioindexer.ui.components.SongDetailDialog
@@ -85,6 +91,7 @@ fun MainScreen(
     val stagedSongs by viewModel.stagedSongs.collectAsState()
     val songCount by viewModel.songCount.collectAsState()
     val stagedCount by viewModel.stagedCount.collectAsState()
+    val uncategorizedCount by viewModel.uncategorizedCount.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val storageVolumes by viewModel.storageVolumes.collectAsState()
     val hasManageStorage by viewModel.hasManageStorage.collectAsState()
@@ -92,6 +99,23 @@ fun MainScreen(
     val serviceStatus by viewModel.serviceStatus.collectAsState()
     val scanProgress by viewModel.scanProgress.collectAsState()
     val isObserverActive by viewModel.isObserverActive.collectAsState()
+
+    // AI States
+    val aiKeys by viewModel.aiKeys.collectAsState()
+    val aiLogs by viewModel.aiLogs.collectAsState()
+    val showAiPrompt by viewModel.showAiPrompt.collectAsState()
+    val isAiCategorizing by viewModel.isAiCategorizing.collectAsState()
+    val aiProgressCurrent by viewModel.aiProgressCurrent.collectAsState()
+    val aiProgressTotal by viewModel.aiProgressTotal.collectAsState()
+    val lastCategoryResult by viewModel.lastCategoryResult.collectAsState()
+    val keyTestingState by viewModel.keyTestingState.collectAsState()
+
+    // Playback States
+    val playbackState by viewModel.playbackState.collectAsState()
+    val showFullPlayer by viewModel.showFullPlayer.collectAsState()
+    val remainingQueue by viewModel.remainingQueue.collectAsState()
+
+    // Selected song for details modal
     val selectedSong by viewModel.selectedSong.collectAsState()
     val selectedStagedSong by viewModel.selectedStagedSong.collectAsState()
 
@@ -119,12 +143,12 @@ fun MainScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Audio Indexer",
+                                text = "Audio Indexer & Player",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Room • Compose • Background Service",
+                                text = "AI Categorization • Zero-Repeat Queue",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -144,6 +168,17 @@ fun MainScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+        },
+        bottomBar = {
+            if (playbackState.currentSong != null) {
+                MiniPlaybackBar(
+                    playbackState = playbackState,
+                    onTogglePlayPause = { viewModel.togglePlayPause() },
+                    onSkipNext = { viewModel.skipNext() },
+                    onSkipPrevious = { viewModel.skipPrevious() },
+                    onClick = { viewModel.showFullPlayer.value = true }
+                )
+            }
         }
     ) { innerPadding ->
         Column(
@@ -158,15 +193,16 @@ fun MainScreen(
                     hasReadStorage = hasReadStorage,
                     onRequestStandardPermissions = onRequestStandardPermissions,
                     onRequestManageStorage = onRequestManageStorage,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
 
-            // Tabs
-            PrimaryTabRow(
+            // Scrollable Tab Row with 4 feature tabs
+            ScrollableTabRow(
                 selectedTabIndex = selectedTabIndex,
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = PrimaryCyan,
+                edgePadding = 16.dp,
                 divider = { Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(DarkSurfaceBorder)) }
             ) {
                 Tab(
@@ -214,6 +250,18 @@ fun MainScreen(
                     onClick = { selectedTabIndex = 2 },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("AI Manager (${aiKeys.size})")
+                        }
+                    }
+                )
+
+                Tab(
+                    selected = selectedTabIndex == 3,
+                    onClick = { selectedTabIndex = 3 },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Scanner")
@@ -227,8 +275,17 @@ fun MainScreen(
                 0 -> LibraryTab(
                     songs = songs,
                     searchQuery = searchQuery,
+                    uncategorizedCount = uncategorizedCount,
+                    showAiPrompt = showAiPrompt,
+                    isAiCategorizing = isAiCategorizing,
+                    aiProgressCurrent = aiProgressCurrent,
+                    aiProgressTotal = aiProgressTotal,
+                    lastCategoryResult = lastCategoryResult,
+                    onApproveAi = { viewModel.startAiCategorization() },
+                    onDismissAiPrompt = { viewModel.showAiPrompt.value = false },
                     onSearchChange = { viewModel.searchQuery.value = it },
                     onSongClick = { viewModel.selectedSong.value = it },
+                    onPlaySong = { viewModel.playSong(it) },
                     onStartScanClick = { viewModel.triggerFullScan(context) }
                 )
                 1 -> StagingTab(
@@ -240,7 +297,20 @@ fun MainScreen(
                     onTriggerDeltaCheck = { viewModel.triggerDeltaCheck(context) },
                     onSongClick = { viewModel.selectedStagedSong.value = it }
                 )
-                2 -> ScannerTab(
+                2 -> AiManagerTab(
+                    aiKeys = aiKeys,
+                    aiLogs = aiLogs,
+                    keyTestingState = keyTestingState,
+                    onAddKey = { p, l, k, m -> viewModel.addOrUpdateKey(p, l, k, m) },
+                    onReplaceKey = { id, p, l, k, m -> viewModel.addOrUpdateKey(p, l, k, m, id) },
+                    onToggleKeyActive = { id, active -> viewModel.toggleKeyActive(id, active) },
+                    onTestKeyHealth = { viewModel.testKeyHealth(it) },
+                    onDeleteKey = { viewModel.deleteKey(it) },
+                    onDeleteLog = { viewModel.deleteLog(it) },
+                    onClearAllLogs = { viewModel.clearAllLogs() },
+                    onExportLogs = { onDone -> viewModel.exportLogs(onDone) }
+                )
+                3 -> ScannerTab(
                     serviceStatus = serviceStatus,
                     scanProgress = scanProgress,
                     isObserverActive = isObserverActive,
@@ -258,7 +328,7 @@ fun MainScreen(
         }
     }
 
-    // Modal Details Dialog for either indexed song or staged song
+    // Modal Details Dialog
     SongDetailDialog(
         song = selectedSong,
         stagedSong = selectedStagedSong,
@@ -266,26 +336,64 @@ fun MainScreen(
             viewModel.selectedSong.value = null
             viewModel.selectedStagedSong.value = null
         },
+        onPlay = { viewModel.playSong(it) },
         onPromoteStaged = { viewModel.promoteStagedSong(it) }
     )
+
+    // Full Player Modal with Fatigue Prevention Queue
+    if (showFullPlayer) {
+        FullPlayerDialog(
+            playbackState = playbackState,
+            remainingQueue = remainingQueue,
+            onTogglePlayPause = { viewModel.togglePlayPause() },
+            onSkipNext = { viewModel.skipNext() },
+            onSkipPrevious = { viewModel.skipPrevious() },
+            onSeek = { viewModel.seekTo(it) },
+            onShuffleRemaining = { viewModel.shuffleRemainingQueue() },
+            onDismiss = { viewModel.showFullPlayer.value = false }
+        )
+    }
 }
 
 @Composable
 private fun LibraryTab(
-    songs: List<com.example.audioindexer.data.model.Song>,
+    songs: List<Song>,
     searchQuery: String,
+    uncategorizedCount: Int,
+    showAiPrompt: Boolean,
+    isAiCategorizing: Boolean,
+    aiProgressCurrent: Int,
+    aiProgressTotal: Int,
+    lastCategoryResult: String?,
+    onApproveAi: () -> Unit,
+    onDismissAiPrompt: () -> Unit,
     onSearchChange: (String) -> Unit,
-    onSongClick: (com.example.audioindexer.data.model.Song) -> Unit,
+    onSongClick: (Song) -> Unit,
+    onPlaySong: (Song) -> Unit,
     onStartScanClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // AI Categorization Prompt: "New songs detected. Allow AI categorisation?"
+        if (showAiPrompt && uncategorizedCount > 0 || isAiCategorizing) {
+            AiCategorizationPrompt(
+                uncategorizedCount = uncategorizedCount,
+                isCategorizing = isAiCategorizing,
+                progressCurrent = aiProgressCurrent,
+                progressTotal = aiProgressTotal,
+                lastCategoryResult = lastCategoryResult,
+                onApprove = onApproveAi,
+                onDismiss = onDismissAiPrompt,
+                modifier = Modifier.padding(bottom = 10.dp)
+            )
+        }
 
         // Search Bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
-            placeholder = { Text("Search songs, artists, albums, paths...", fontSize = 13.sp) },
+            placeholder = { Text("Search songs, artists, albums, AI mood tags...", fontSize = 13.sp) },
             leadingIcon = {
                 Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             },
@@ -355,11 +463,15 @@ private fun LibraryTab(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 16.dp),
+                contentPadding = PaddingValues(bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(songs, key = { it.id }) { song ->
-                    SongItemCard(song = song, onClick = { onSongClick(song) })
+                    SongItemCard(
+                        song = song,
+                        onClick = { onSongClick(song) },
+                        onPlayClick = { onPlaySong(song) }
+                    )
                 }
             }
         }
@@ -438,7 +550,7 @@ private fun StagingTab(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 16.dp),
+                contentPadding = PaddingValues(bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(stagedSongs, key = { it.id }) { staged ->
@@ -508,7 +620,7 @@ private fun ScannerTab(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(vertical = 14.dp),
+        contentPadding = PaddingValues(top = 14.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {

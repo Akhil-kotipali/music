@@ -58,5 +58,14 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
+    // Media3 ExoPlayer & Audio Playback Session
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.ui)
+
+    // Networking & Security
+    implementation(libs.okhttp)
+    implementation(libs.androidx.security.crypto)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
