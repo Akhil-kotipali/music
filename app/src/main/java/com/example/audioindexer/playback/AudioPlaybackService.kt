@@ -157,6 +157,13 @@ class AudioPlaybackService : MediaSessionService() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateState()
+                if (playbackState == Player.STATE_READY) {
+                    val sid = player.audioSessionId
+                    if (sid != C.AUDIO_SESSION_ID_UNSET && sid > 0) {
+                        audioEffectsManager.attachToAudioSession(sid)
+                        beatDetectorManager.attachToAudioSession(sid)
+                    }
+                }
                 if (playbackState == Player.STATE_ENDED) {
                     fatigueQueue.currentSong?.let {
                         skipRecommendationEngine.onSongCompleted(it, currentPlaylistId)
@@ -179,13 +186,16 @@ class AudioPlaybackService : MediaSessionService() {
             }
         }
 
-        // Periodic ticker for current position when playing
+        // Periodic ticker for current position & rhythmic haptics when playing
         serviceScope.launch {
             while (isActive) {
                 if (::player.isInitialized && player.isPlaying) {
                     updateState()
+                    if (::beatDetectorManager.isInitialized) {
+                        beatDetectorManager.onPlaybackTick(player.currentPosition)
+                    }
                 }
-                delay(500L)
+                delay(300L)
             }
         }
 
@@ -375,6 +385,11 @@ class AudioPlaybackService : MediaSessionService() {
 
         player.setMediaItem(mediaItem)
         player.prepare()
+        val sid = player.audioSessionId
+        if (sid != C.AUDIO_SESSION_ID_UNSET && sid > 0) {
+            audioEffectsManager.attachToAudioSession(sid)
+            beatDetectorManager.attachToAudioSession(sid)
+        }
         player.play()
         updateState()
     }
@@ -400,6 +415,12 @@ class AudioPlaybackService : MediaSessionService() {
 
     fun setBeatModeEnabled(enabled: Boolean) {
         if (::beatDetectorManager.isInitialized) {
+            if (::player.isInitialized) {
+                val sid = player.audioSessionId
+                if (sid != C.AUDIO_SESSION_ID_UNSET && sid > 0) {
+                    beatDetectorManager.attachToAudioSession(sid)
+                }
+            }
             beatDetectorManager.setBeatModeEnabled(enabled)
             updateState()
         }

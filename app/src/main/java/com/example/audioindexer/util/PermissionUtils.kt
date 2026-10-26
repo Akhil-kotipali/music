@@ -67,6 +67,7 @@ object PermissionUtils {
         } else {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
+        permissions.add(Manifest.permission.RECORD_AUDIO)
 
         return permissions.toTypedArray()
     }
