@@ -100,6 +100,11 @@ class AudioEffectsManager(private val context: Context) {
     }
 
     /**
+     * Alias for setBassBoostStrength
+     */
+    fun setBassStrength(strength: Int) = setBassBoostStrength(strength)
+
+    /**
      * Enables or disables Bass Boost.
      */
     fun toggleBassBoost(enable: Boolean) {

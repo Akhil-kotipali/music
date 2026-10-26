@@ -421,6 +421,8 @@ fun FullPlayerDialog(
                                     EngineStateMode.HUNTING_MODE -> PrimaryCyan.copy(alpha = 0.15f)
                                     EngineStateMode.CONTRASTED_FILTER -> SecondaryViolet.copy(alpha = 0.15f)
                                     EngineStateMode.SHORT_TERM_PIVOT -> AccentOrange.copy(alpha = 0.15f)
+                                    EngineStateMode.MOOD_MISMATCH -> AccentOrange.copy(alpha = 0.15f)
+                                    EngineStateMode.MOOD_ALIGNMENT -> AccentGreen.copy(alpha = 0.15f)
                                     EngineStateMode.NORMAL -> DarkSurfaceBorder.copy(alpha = 0.4f)
                                 }
                             )
@@ -432,6 +434,8 @@ fun FullPlayerDialog(
                                     EngineStateMode.HUNTING_MODE -> Icons.Default.Search
                                     EngineStateMode.CONTRASTED_FILTER -> Icons.Default.ElectricBolt
                                     EngineStateMode.SHORT_TERM_PIVOT -> Icons.Default.Speed
+                                    EngineStateMode.MOOD_MISMATCH -> Icons.Default.Tune
+                                    EngineStateMode.MOOD_ALIGNMENT -> Icons.Default.MusicNote
                                     EngineStateMode.NORMAL -> Icons.Default.MusicNote
                                 },
                                 contentDescription = null,
@@ -439,6 +443,8 @@ fun FullPlayerDialog(
                                     EngineStateMode.HUNTING_MODE -> PrimaryCyan
                                     EngineStateMode.CONTRASTED_FILTER -> SecondaryViolet
                                     EngineStateMode.SHORT_TERM_PIVOT -> AccentOrange
+                                    EngineStateMode.MOOD_MISMATCH -> AccentOrange
+                                    EngineStateMode.MOOD_ALIGNMENT -> AccentGreen
                                     EngineStateMode.NORMAL -> AccentGreen
                                 },
                                 modifier = Modifier.size(13.dp)
