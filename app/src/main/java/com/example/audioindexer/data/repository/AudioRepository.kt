@@ -16,6 +16,12 @@ class AudioRepository(
     private val songDao: SongDao,
     private val stagedSongDao: StagedSongDao
 ) {
+    constructor(database: AudioDatabase) : this(
+        database = database,
+        songDao = database.songDao(),
+        stagedSongDao = database.stagedSongDao()
+    )
+
     val allSongs: Flow<List<Song>> = songDao.getAllSongs()
     val allStagedSongs: Flow<List<StagedSong>> = stagedSongDao.getAllStagedSongs()
     val songCount: Flow<Int> = songDao.getSongCount()
