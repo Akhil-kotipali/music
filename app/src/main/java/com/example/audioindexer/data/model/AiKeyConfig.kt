@@ -7,7 +7,11 @@ import androidx.room.PrimaryKey
 enum class AiProvider(val displayName: String, val defaultModel: String) {
     GEMINI("Google Gemini", "gemini-1.5-flash"),
     GROQ("Groq", "llama-3.3-70b-versatile"),
-    OPENAI("OpenAI", "gpt-4o-mini")
+    OPENAI("OpenAI", "gpt-4o-mini");
+
+    companion object {
+        fun fromString(name: String): AiProvider? = entries.find { it.name.equals(name, ignoreCase = true) }
+    }
 }
 
 @Entity(

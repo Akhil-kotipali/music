@@ -136,7 +136,7 @@ object AudioScanner {
             )
         )
 
-        indexedCount
+        newlyIndexedCount
     }
 
     /**
