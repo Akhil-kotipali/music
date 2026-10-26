@@ -81,9 +81,18 @@ class AuditRemediationRegressionTest {
         override fun getUncategorizedCount(): Flow<Int> = emptyFlow()
         override fun getSongsByCategory(category: String): Flow<List<Song>> = emptyFlow()
         override suspend fun getSongsByCategoryDirect(category: String): List<Song> =
-            songs.values.filter { it.aiCategory == category && it.isMusic }
+            songs.values.filter { it.aiCategory?.trim()?.equals(category.trim(), ignoreCase = true) == true && it.isMusic }
 
-        override suspend fun updateAiCategory(id: Long, category: String) {
+        override suspend fun getSongsByCategoriesDirect(categories: List<String>): List<Song> {
+            val lowerSet = categories.map { it.trim().lowercase() }.toSet()
+            return songs.values.filter { song ->
+                song.isMusic && song.aiCategory?.trim()?.lowercase() in lowerSet
+            }
+        }
+
+        override fun getDistinctUsedCategories(): Flow<List<String>> = emptyFlow()
+
+        override suspend fun updateAiCategory(id: Long, category: String?) {
             val existing = songs[id] ?: return
             songs[id] = existing.copy(aiCategory = category)
         }
