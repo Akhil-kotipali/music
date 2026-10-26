@@ -45,9 +45,10 @@ data class SkipEngineStatus(
  *      and notifies the user via a Toast notification.
  */
 class SkipRecommendationEngine(
-    private val context: Context,
+    private val context: Context? = null,
     private val playlistDao: PlaylistDao,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val onToastNotification: ((String) -> Unit)? = null
 ) {
     companion object {
         const val HARD_SKIP_THRESHOLD_MS = 15_000L // 15 seconds
@@ -278,8 +279,15 @@ class SkipRecommendationEngine(
     }
 
     private fun showToast(message: String) {
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        onToastNotification?.invoke(message)
+        if (context != null) {
+            try {
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Throwable) {
+                // Ignore in headless/test environments
+            }
         }
     }
 }
