@@ -26,12 +26,35 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run Unit Tests and Build Debug and Release APK with Gradle
-        run: ./gradlew testDebugUnitTest assembleDebug assembleRelease --stacktrace
+      - name: Generate Release Keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore app/release.keystore \
+            -alias musicplayer \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass androidmusicplayer \
+            -keypass androidmusicplayer \
+            -dname "CN=AudioIndexer, OU=MusicPlayer, O=AudioIndexer, L=City, ST=State, C=US"
 
-      - name: Upload APK Artifacts
+      - name: Run Unit Tests and Build Signed Release APK with Gradle
+        run: ./gradlew testDebugUnitTest assembleRelease assembleDebug --stacktrace
+        env:
+          KEYSTORE_PASSWORD: "androidmusicplayer"
+          KEY_ALIAS: "musicplayer"
+          KEY_PASSWORD: "androidmusicplayer"
+
+      - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-apks
-          path: app/build/outputs/apk/**/*.apk
+          name: app-release-signed
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
