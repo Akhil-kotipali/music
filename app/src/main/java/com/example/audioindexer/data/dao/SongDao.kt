@@ -51,14 +51,20 @@ interface SongDao {
     @Query("SELECT COUNT(*) FROM songs WHERE is_music = 1 AND (ai_category IS NULL OR ai_category = '')")
     fun getUncategorizedCount(): Flow<Int>
 
-    @Query("SELECT * FROM songs WHERE ai_category = :category ORDER BY title ASC")
+    @Query("SELECT * FROM songs WHERE LOWER(TRIM(ai_category)) = LOWER(TRIM(:category)) ORDER BY title ASC")
     fun getSongsByCategory(category: String): Flow<List<Song>>
 
-    @Query("SELECT * FROM songs WHERE ai_category = :category AND is_music = 1 ORDER BY title ASC")
+    @Query("SELECT * FROM songs WHERE LOWER(TRIM(ai_category)) = LOWER(TRIM(:category)) AND is_music = 1 ORDER BY title ASC")
     suspend fun getSongsByCategoryDirect(category: String): List<Song>
 
+    @Query("SELECT * FROM songs WHERE is_music = 1 AND LOWER(TRIM(ai_category)) IN (:categories) ORDER BY title ASC")
+    suspend fun getSongsByCategoriesDirect(categories: List<String>): List<Song>
+
+    @Query("SELECT DISTINCT ai_category FROM songs WHERE is_music = 1 AND ai_category IS NOT NULL AND ai_category != '' ORDER BY ai_category ASC")
+    fun getDistinctUsedCategories(): Flow<List<String>>
+
     @Query("UPDATE songs SET ai_category = :category WHERE id = :id")
-    suspend fun updateAiCategory(id: Long, category: String)
+    suspend fun updateAiCategory(id: Long, category: String?)
 
     @Query("""
         SELECT * FROM songs 

@@ -87,4 +87,39 @@ class AiManagerAdaptivePromptTest {
         assertEquals("Sad", results[3L])
         assertEquals("Focus", results[4L])
     }
+
+    @Test
+    fun testParseCategory_customUserDefinedCategories() {
+        val customCategories = listOf("Synthwave", "Gym Workout", "Late Night Drive", "Meditation")
+
+        // Exact and case-insensitive
+        assertEquals("Synthwave", AiManager.parseCategory("synthwave", customCategories))
+        assertEquals("Gym Workout", AiManager.parseCategory("Gym Workout", customCategories))
+        assertEquals("Late Night Drive", AiManager.parseCategory("late night drive", customCategories))
+        assertEquals("Meditation", AiManager.parseCategory("meditation", customCategories))
+
+        // Contained in punctuation / text
+        assertEquals("Synthwave", AiManager.parseCategory("**Synthwave**", customCategories))
+        assertEquals("Gym Workout", AiManager.parseCategory("[Gym Workout / Cardio]", customCategories))
+
+        // When standard categories are not in custom list, they shouldn't match
+        assertNull(AiManager.parseCategory("Sad", customCategories))
+    }
+
+    @Test
+    fun testParsePartResponse_withCustomCategories() {
+        val songs = listOf(
+            Song(id = 10, filePath = "/path/10.mp3", title = "Retro Cyber", artist = "Artist X", album = "Album X"),
+            Song(id = 20, filePath = "/path/20.mp3", title = "Beast Mode", artist = "Artist Y", album = "Album Y")
+        )
+        val customCategories = listOf("Synthwave", "Gym Workout")
+        val response = """
+            [ID: 10]: Synthwave
+            [ID: 20]: Gym Workout
+        """.trimIndent()
+
+        val results = AiManager.parsePartResponse(response, songs, customCategories)
+        assertEquals("Synthwave", results[10L])
+        assertEquals("Gym Workout", results[20L])
+    }
 }

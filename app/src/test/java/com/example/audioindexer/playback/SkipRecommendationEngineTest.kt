@@ -244,4 +244,33 @@ class SkipRecommendationEngineTest {
         assertTrue(mockDao.deletedFromPlaylist.contains(Pair(playlistId, song.id)))
         assertTrue(notifications.any { it.contains("Auto-pruned 'Annoying Track'") })
     }
+
+    @Test
+    fun testMoodMismatch_triggersMoodAdjustmentInsteadOfHuntingMode() = runBlocking {
+        val mockDao = MockPlaylistDao()
+        val engine = SkipRecommendationEngine(
+            playlistDao = mockDao,
+            scope = CoroutineScope(Dispatchers.Unconfined)
+        )
+
+        val queue = listOf(
+            createSong(1, "Sad 1", "Sad"),
+            createSong(2, "Sad 2", "Sad"),
+            createSong(3, "Happy 1", "High Energy"),
+            createSong(4, "Study 1", "Focus")
+        )
+
+        // User skips first Sad song
+        engine.onSkipClicked(1000L, queue[0], null, queue.subList(1, queue.size))
+
+        // User skips second Sad song (two consecutive Sad songs skipped)
+        val reordered = engine.onSkipClicked(1500L, queue[1], null, queue.subList(2, queue.size))
+
+        // Should enter MOOD_MISMATCH mode and pivot away from Sad, not enter hunting mode
+        assertEquals(EngineStateMode.MOOD_MISMATCH, engine.engineStatus.value.mode)
+        assertTrue(engine.engineStatus.value.lastActionDescription.contains("Mood mismatch"))
+
+        // First track in reordered upcoming queue should be a non-Sad track
+        assertEquals("High Energy", reordered.first().aiCategory)
+    }
 }

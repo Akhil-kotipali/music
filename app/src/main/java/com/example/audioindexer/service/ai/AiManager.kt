@@ -3,6 +3,7 @@ package com.example.audioindexer.service.ai
 import android.content.Context
 import com.example.audioindexer.data.dao.AiKeyConfigDao
 import com.example.audioindexer.data.dao.AiLogDao
+import com.example.audioindexer.data.dao.CategoryDao
 import com.example.audioindexer.data.dao.SongDao
 import com.example.audioindexer.data.model.AiKeyConfig
 import com.example.audioindexer.data.model.AiLog
@@ -43,7 +44,8 @@ class AiManager(
     private val context: Context,
     private val keyConfigDao: AiKeyConfigDao,
     private val logDao: AiLogDao,
-    private val songDao: SongDao
+    private val songDao: SongDao,
+    private val categoryDao: CategoryDao? = null
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -84,7 +86,7 @@ class AiManager(
         /**
          * Parses the category response with robust matching across punctuation, hyphens, and mood synonyms.
          */
-        fun parseCategory(rawResponse: String): String? {
+        fun parseCategory(rawResponse: String, targetCategories: List<String> = ALLOWED_CATEGORIES): String? {
             val clean = rawResponse.trim()
                 .replace("*", "")
                 .replace("#", "")
@@ -97,33 +99,52 @@ class AiManager(
                 .trim()
                 .lowercase(Locale.ROOT)
 
-            // 1. Exact canonical matches
-            if (clean == "love") return "Love"
-            if (clean == "motivational" || clean == "motivation") return "Motivational"
-            if (clean == "sad" || clean == "sadness") return "Sad"
-            if (clean == "high energy" || clean == "highenergy" || clean == "energy") return "High Energy"
-            if (clean == "relaxed" || clean == "relaxing" || clean == "relax") return "Relaxed"
-            if (clean == "focus" || clean == "focusing") return "Focus"
+            // 1. Exact canonical matches against targetCategories
+            for (category in targetCategories) {
+                if (clean == category.lowercase(Locale.ROOT)) {
+                    return category
+                }
+            }
+
+            val targetMap = targetCategories.associateBy { it.lowercase(Locale.ROOT) }
+            if (clean == "love" && targetMap.containsKey("love")) return targetMap["love"]
+            if ((clean == "motivational" || clean == "motivation") && targetMap.containsKey("motivational")) return targetMap["motivational"]
+            if ((clean == "sad" || clean == "sadness") && targetMap.containsKey("sad")) return targetMap["sad"]
+            if ((clean == "high energy" || clean == "highenergy" || clean == "energy") && targetMap.containsKey("high energy")) return targetMap["high energy"]
+            if ((clean == "relaxed" || clean == "relaxing" || clean == "relax") && targetMap.containsKey("relaxed")) return targetMap["relaxed"]
+            if ((clean == "focus" || clean == "focusing") && targetMap.containsKey("focus")) return targetMap["focus"]
 
             // 2. Direct containment of allowed categories
-            for (category in ALLOWED_CATEGORIES) {
+            for (category in targetCategories) {
                 if (clean.contains(category.lowercase(Locale.ROOT))) {
                     return category
                 }
             }
 
             // 3. Synonym and mood heuristic mapping
-            if (clean.contains("romantic") || clean.contains("romance") || clean.contains("ballad") || clean.contains("passion") || clean.contains("affection")) return "Love"
-            if (clean.contains("motivat") || clean.contains("inspir") || clean.contains("uplift") || clean.contains("triumph") || clean.contains("courage") || clean.contains("anthem") || clean.contains("empower")) return "Motivational"
-            if (clean.contains("sad") || clean.contains("melanchol") || clean.contains("heartbreak") || clean.contains("grief") || clean.contains("sorrow") || clean.contains("gloomy") || clean.contains("depress") || clean.contains("lonely")) return "Sad"
-            if (clean.contains("high energy") || clean.contains("energetic") || clean.contains("party") || clean.contains("dance") || clean.contains("rock") || clean.contains("electronic") || clean.contains("workout") || clean.contains("upbeat") || clean.contains("hype") || clean.contains("fast")) return "High Energy"
-            if (clean.contains("relax") || clean.contains("chill") || clean.contains("calm") || clean.contains("peaceful") || clean.contains("ambient") || clean.contains("sooth") || clean.contains("acoustic") || clean.contains("lofi") || clean.contains("lo fi") || clean.contains("serene")) return "Relaxed"
-            if (clean.contains("focus") || clean.contains("study") || clean.contains("concentrat") || clean.contains("instrumental") || clean.contains("classical") || clean.contains("work") || clean.contains("meditat")) return "Focus"
+            if (clean.contains("romantic") || clean.contains("romance") || clean.contains("ballad") || clean.contains("passion") || clean.contains("affection")) {
+                targetMap["love"]?.let { return it }
+            }
+            if (clean.contains("motivat") || clean.contains("inspir") || clean.contains("uplift") || clean.contains("triumph") || clean.contains("courage") || clean.contains("anthem") || clean.contains("empower")) {
+                targetMap["motivational"]?.let { return it }
+            }
+            if (clean.contains("sad") || clean.contains("melanchol") || clean.contains("heartbreak") || clean.contains("grief") || clean.contains("sorrow") || clean.contains("gloomy") || clean.contains("depress") || clean.contains("lonely")) {
+                targetMap["sad"]?.let { return it }
+            }
+            if (clean.contains("high energy") || clean.contains("energetic") || clean.contains("party") || clean.contains("dance") || clean.contains("rock") || clean.contains("electronic") || clean.contains("workout") || clean.contains("upbeat") || clean.contains("hype") || clean.contains("fast")) {
+                targetMap["high energy"]?.let { return it }
+            }
+            if (clean.contains("relax") || clean.contains("chill") || clean.contains("calm") || clean.contains("peaceful") || clean.contains("ambient") || clean.contains("sooth") || clean.contains("acoustic") || clean.contains("lofi") || clean.contains("lo fi") || clean.contains("serene")) {
+                targetMap["relaxed"]?.let { return it }
+            }
+            if (clean.contains("focus") || clean.contains("study") || clean.contains("concentrat") || clean.contains("instrumental") || clean.contains("classical") || clean.contains("work") || clean.contains("meditat")) {
+                targetMap["focus"]?.let { return it }
+            }
 
             return null
         }
 
-        fun parsePartResponse(responseText: String, songs: List<Song>): Map<Long, String> {
+        fun parsePartResponse(responseText: String, songs: List<Song>, targetCategories: List<String> = ALLOWED_CATEGORIES): Map<Long, String> {
             val results = mutableMapOf<Long, String>()
             val lines = responseText.lines()
 
@@ -143,7 +164,7 @@ class AiManager(
                         val match = pattern.find(line)
                         if (match != null) {
                             val candidate = match.groupValues[1].trim()
-                            val parsed = parseCategory(candidate)
+                            val parsed = parseCategory(candidate, targetCategories)
                             if (parsed != null) {
                                 matchedCategory = parsed
                                 break
@@ -157,7 +178,7 @@ class AiManager(
                 if (matchedCategory == null) {
                     for (line in lines) {
                         if (line.contains("[ID: $id]", ignoreCase = true) || line.contains("ID: $id", ignoreCase = true)) {
-                            val parsed = parseCategory(line)
+                            val parsed = parseCategory(line, targetCategories)
                             if (parsed != null) {
                                 matchedCategory = parsed
                                 break
@@ -187,6 +208,15 @@ class AiManager(
         }
     }
 
+    suspend fun getActiveCategories(): List<String> {
+        val fromDb = try {
+            categoryDao?.getAllCategoryNamesDirect()
+        } catch (_: Exception) {
+            null
+        }
+        return if (!fromDb.isNullOrEmpty()) fromDb else ALLOWED_CATEGORIES
+    }
+
     /**
      * Categorizes a single song by extracting metadata and a 30-second lyric/audio snippet.
      * Automatically handles key rotation, rate limit fallbacks, and prompt length condensation.
@@ -197,6 +227,7 @@ class AiManager(
             return@withContext null
         }
 
+        val activeCategories = getActiveCategories()
         val audioFile = File(song.filePath)
         val rawSnippet = if (!song.lyricsSnippet.isNullOrBlank() && !song.lyricsSnippet.startsWith("Placeholder")) {
             song.lyricsSnippet
@@ -212,7 +243,7 @@ class AiManager(
             appendLine("30-Second Text/Audio Snippet:")
             appendLine(snippet)
             appendLine()
-            appendLine("Instruction: $STRICT_SYSTEM_PROMPT Reply ONLY with the chosen tag name.")
+            appendLine("Instruction: Categorize this song into exactly one primary mood/genre tag from this list: ${activeCategories.joinToString(", ")}. Reply ONLY with the chosen tag name.")
         }
 
         val activeKeys = keyConfigDao.getAllActiveKeys()
@@ -242,7 +273,7 @@ class AiManager(
             try {
                 val responseText = executeAiRequest(key, prompt)
                 val duration = System.currentTimeMillis() - startTime
-                val parsedCategory = parseCategory(responseText)
+                val parsedCategory = parseCategory(responseText, activeCategories)
 
                 if (parsedCategory != null) {
                     matchedCategory = parsedCategory
@@ -422,7 +453,8 @@ class AiManager(
         }
 
         // Build multi-song prompt for the part
-        val partPrompt = buildPartPrompt(part)
+        val activeCategories = getActiveCategories()
+        val partPrompt = buildPartPrompt(part, activeCategories)
 
         // Check if pre-emptive length exceeds safety threshold
         if (partPrompt.length > MAX_PROMPT_CHARS) {
@@ -463,7 +495,7 @@ class AiManager(
                 val responseText = executeAiRequest(key, partPrompt)
                 val duration = System.currentTimeMillis() - start
 
-                val parsedMap = parsePartResponse(responseText, part)
+                val parsedMap = parsePartResponse(responseText, part, activeCategories)
                 if (parsedMap.isNotEmpty()) {
                     keyConfigDao.update(
                         key.copy(
@@ -560,8 +592,8 @@ class AiManager(
         return results
     }
 
-    private fun buildPartPrompt(songs: List<Song>): String = buildString {
-        appendLine("Instruction: Categorize each numbered song below into exactly one primary mood/genre tag from: Love, Motivational, Sad, High Energy, Relaxed, Focus.")
+    private fun buildPartPrompt(songs: List<Song>, targetCategories: List<String> = ALLOWED_CATEGORIES): String = buildString {
+        appendLine("Instruction: Categorize each numbered song below into exactly one primary mood/genre tag from: ${targetCategories.joinToString(", ")}.")
         appendLine("Format your response strictly line by line with the song ID and chosen tag:")
         appendLine("[ID: <number>]: <Tag>")
         appendLine()
@@ -577,8 +609,8 @@ class AiManager(
         }
     }
 
-    fun parsePartResponse(responseText: String, songs: List<Song>): Map<Long, String> =
-        Companion.parsePartResponse(responseText, songs)
+    fun parsePartResponse(responseText: String, songs: List<Song>, targetCategories: List<String> = ALLOWED_CATEGORIES): Map<Long, String> =
+        Companion.parsePartResponse(responseText, songs, targetCategories)
 
     /**
      * Tests health and rate-limiting status of an API key

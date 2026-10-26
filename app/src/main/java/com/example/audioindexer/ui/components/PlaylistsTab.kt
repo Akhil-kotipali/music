@@ -47,6 +47,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.audioindexer.data.model.Category
 import com.example.audioindexer.data.model.Playlist
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.ui.theme.AccentGreen
@@ -79,8 +83,10 @@ fun PlaylistsTab(
     onPlaySongFromPlaylist: (Playlist, Song) -> Unit,
     onDeletePlaylist: (Playlist) -> Unit,
     onRemoveSongFromPlaylist: (Long, Long) -> Unit,
-    onCreateCategoryPlaylist: (name: String, description: String, category: String, onResult: (Boolean, String) -> Unit) -> Unit,
+    onCreateCategoryPlaylist: (name: String, description: String, categories: List<String>, onResult: (Boolean, String) -> Unit) -> Unit,
     onCreateCustomPlaylist: (name: String, description: String, songIds: List<Long>, onResult: (Boolean, String) -> Unit) -> Unit,
+    availableCategories: List<Category> = emptyList(),
+    onManageCategories: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -122,14 +128,28 @@ fun PlaylistsTab(
                     )
                 }
 
-                Button(
-                    onClick = { showCreateDialog = true },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan, contentColor = Color.Black)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("New Playlist", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onManageCategories != null) {
+                        OutlinedButton(
+                            onClick = onManageCategories,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(15.dp), tint = SecondaryViolet)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Categories", fontSize = 11.sp, color = SecondaryViolet)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Button(
+                        onClick = { showCreateDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan, contentColor = Color.Black)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("New Playlist", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
             }
 
@@ -194,9 +214,10 @@ fun PlaylistsTab(
     if (showCreateDialog) {
         CreatePlaylistDialog(
             allSongs = allSongs,
+            availableCategories = availableCategories,
             onDismiss = { showCreateDialog = false },
-            onCreateCategory = { name, desc, cat, cb ->
-                onCreateCategoryPlaylist(name, desc, cat, cb)
+            onCreateCategory = { name, desc, cats, cb ->
+                onCreateCategoryPlaylist(name, desc, cats, cb)
                 showCreateDialog = false
             },
             onCreateCustom = { name, desc, ids, cb ->
@@ -406,18 +427,29 @@ fun PlaylistDetailView(
 @Composable
 fun CreatePlaylistDialog(
     allSongs: List<Song>,
+    availableCategories: List<Category> = emptyList(),
     onDismiss: () -> Unit,
-    onCreateCategory: (name: String, description: String, category: String, onResult: (Boolean, String) -> Unit) -> Unit,
+    onCreateCategory: (name: String, description: String, categories: List<String>, onResult: (Boolean, String) -> Unit) -> Unit,
     onCreateCustom: (name: String, description: String, songIds: List<Long>, onResult: (Boolean, String) -> Unit) -> Unit
 ) {
     var mode by remember { mutableStateOf<String>("CATEGORY") } // "CATEGORY" or "CUSTOM"
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("Focus") }
+    val selectedCategories = remember { mutableStateListOf<String>() }
     var searchQuery by remember { mutableStateOf("") }
+    var customCategoryFilter by remember { mutableStateOf<String?>(null) }
     val selectedSongIds = remember { mutableStateListOf<Long>() }
 
-    val categories = listOf("Love", "Motivational", "Sad", "High Energy", "Relaxed", "Focus")
+    val categoryNames = remember(availableCategories) {
+        if (availableCategories.isNotEmpty()) availableCategories.map { it.name }
+        else listOf("Love", "Motivational", "Sad", "High Energy", "Relaxed", "Focus")
+    }
+
+    LaunchedEffect(categoryNames) {
+        if (selectedCategories.isEmpty() && categoryNames.isNotEmpty()) {
+            selectedCategories.add(categoryNames.first())
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -435,7 +467,7 @@ fun CreatePlaylistDialog(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Choose auto-populate by mood or manually pick tracks.",
+                    text = "Auto-populate from categories/moods or pick custom songs.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -460,7 +492,7 @@ fun CreatePlaylistDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "AI Category / Mood",
+                            text = "Category / Mood Mix",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (mode == "CATEGORY") Color.Black else MaterialTheme.colorScheme.onSurface
@@ -477,7 +509,7 @@ fun CreatePlaylistDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Custom Songs",
+                            text = "Custom Pick Songs",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (mode == "CUSTOM") Color.Black else MaterialTheme.colorScheme.onSurface
@@ -491,7 +523,13 @@ fun CreatePlaylistDialog(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Playlist Name") },
-                    placeholder = { Text(if (mode == "CATEGORY") "$selectedCategory Mix" else "My Favorite Mix") },
+                    placeholder = {
+                        Text(
+                            if (mode == "CATEGORY") {
+                                if (selectedCategories.isNotEmpty()) "${selectedCategories.joinToString(" & ")} Mix" else "My Mood Mix"
+                            } else "My Favorite Mix"
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
                 )
@@ -499,65 +537,150 @@ fun CreatePlaylistDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 if (mode == "CATEGORY") {
-                    // Category Selection Chips
+                    // Category Selection Chips with real-time song count
                     Text(
-                        text = "Choose AI Category (All matching songs added):",
+                        text = "Select one or more categories:",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = PrimaryCyan
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 160.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        categories.take(3).forEach { cat ->
-                            val isSel = selectedCategory == cat
-                            Box(
+                        items(categoryNames) { cat ->
+                            val isSel = selectedCategories.contains(cat)
+                            val count = allSongs.count { it.aiCategory?.trim()?.equals(cat.trim(), ignoreCase = true) == true }
+
+                            Card(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) PrimaryCyan else DarkSurfaceBorder.copy(alpha = 0.4f))
-                                    .clickable { selectedCategory = cat }
-                                    .padding(vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = cat,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSel) Color.Black else MaterialTheme.colorScheme.onSurface
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isSel) {
+                                            if (selectedCategories.size > 1) {
+                                                selectedCategories.remove(cat)
+                                            }
+                                        } else {
+                                            selectedCategories.add(cat)
+                                        }
+                                    },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSel) PrimaryCyan.copy(alpha = 0.18f) else DarkSurfaceBorder.copy(alpha = 0.3f)
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = if (isSel) 1.5.dp else 1.dp,
+                                    color = if (isSel) PrimaryCyan else DarkSurfaceBorder
                                 )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = isSel,
+                                            onCheckedChange = { checked ->
+                                                if (checked) {
+                                                    if (!selectedCategories.contains(cat)) selectedCategories.add(cat)
+                                                } else {
+                                                    if (selectedCategories.size > 1) selectedCategories.remove(cat)
+                                                }
+                                            },
+                                            colors = CheckboxDefaults.colors(checkedColor = PrimaryCyan)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = cat,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSel) PrimaryCyan else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (isSel) PrimaryCyan else DarkSurfaceBorder)
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "$count tracks",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSel) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+
+                    val totalSelectedCount = allSongs.count { song ->
+                        val songCat = song.aiCategory?.trim()
+                        selectedCategories.any { sel -> sel.trim().equals(songCat, ignoreCase = true) }
+                    }
+
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Text(
+                        text = "Total songs in selection: $totalSelectedCount",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGreen
+                    )
+                } else {
+                    // Custom songs multi-select list with Category Filter
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        categories.drop(3).forEach { cat ->
-                            val isSel = selectedCategory == cat
+                        item {
+                            val isAll = customCategoryFilter == null
                             Box(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) PrimaryCyan else DarkSurfaceBorder.copy(alpha = 0.4f))
-                                    .clickable { selectedCategory = cat }
-                                    .padding(vertical = 6.dp),
-                                contentAlignment = Alignment.Center
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isAll) PrimaryCyan else DarkSurfaceBorder.copy(alpha = 0.4f))
+                                    .clickable { customCategoryFilter = null }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    text = cat,
-                                    fontSize = 11.sp,
+                                    text = "All (${allSongs.size})",
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isAll) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isAll) Color.Black else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        items(categoryNames) { cat ->
+                            val isSel = customCategoryFilter == cat
+                            val count = allSongs.count { it.aiCategory?.trim()?.equals(cat.trim(), ignoreCase = true) == true }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) PrimaryCyan else DarkSurfaceBorder.copy(alpha = 0.4f))
+                                    .clickable { customCategoryFilter = cat }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "$cat ($count)",
+                                    fontSize = 10.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSel) Color.Black else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
                     }
-                } else {
-                    // Custom songs multi-select list
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -575,17 +698,23 @@ fun CreatePlaylistDialog(
                         fontWeight = FontWeight.Bold
                     )
 
-                    val filtered = remember(searchQuery, allSongs) {
-                        if (searchQuery.isBlank()) allSongs
-                        else allSongs.filter { it.title.contains(searchQuery, ignoreCase = true) || it.artist.contains(searchQuery, ignoreCase = true) }
+                    val filtered = remember(searchQuery, customCategoryFilter, allSongs) {
+                        allSongs.filter { song ->
+                            val matchesQuery = searchQuery.isBlank() ||
+                                    song.title.contains(searchQuery, ignoreCase = true) ||
+                                    song.artist.contains(searchQuery, ignoreCase = true)
+                            val matchesCategory = customCategoryFilter == null ||
+                                    song.aiCategory?.trim()?.equals(customCategoryFilter!!.trim(), ignoreCase = true) == true
+                            matchesQuery && matchesCategory
+                        }
                     }
 
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp)
+                            .height(150.dp)
                     ) {
-                        items(filtered.take(50), key = { it.id }) { song ->
+                        items(filtered.take(60), key = { it.id }) { song ->
                             val isChecked = selectedSongIds.contains(song.id)
                             Row(
                                 modifier = Modifier
@@ -606,9 +735,19 @@ fun CreatePlaylistDialog(
                                     colors = CheckboxDefaults.colors(checkedColor = PrimaryCyan)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(text = song.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                     Text(text = song.artist, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                                if (!song.aiCategory.isNullOrBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(SecondaryViolet.copy(alpha = 0.2f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(text = song.aiCategory!!, fontSize = 9.sp, color = PrimaryCyan)
+                                    }
                                 }
                             }
                         }
@@ -628,10 +767,12 @@ fun CreatePlaylistDialog(
                     Button(
                         onClick = {
                             val playlistTitle = name.ifBlank {
-                                if (mode == "CATEGORY") "$selectedCategory Mix" else "Custom Mix"
+                                if (mode == "CATEGORY") {
+                                    if (selectedCategories.isNotEmpty()) "${selectedCategories.joinToString(" & ")} Mix" else "Mood Mix"
+                                } else "Custom Mix"
                             }
                             if (mode == "CATEGORY") {
-                                onCreateCategory(playlistTitle, description, selectedCategory) { _, _ -> }
+                                onCreateCategory(playlistTitle, description, selectedCategories.toList()) { _, _ -> }
                             } else {
                                 onCreateCustom(playlistTitle, description, selectedSongIds.toList()) { _, _ -> }
                             }

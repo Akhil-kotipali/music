@@ -23,6 +23,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ElectricBolt
@@ -38,11 +39,14 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -313,8 +317,12 @@ fun FullPlayerDialog(
     sleepTimerRemainingSec: Int? = null,
     onStartSleepTimer: (Int) -> Unit = {},
     onCancelSleepTimer: () -> Unit = {},
-    currentPreset: String = "Balanced",
-    onSetPreset: (String) -> Unit = {}
+    currentPreset: String = "Mega Bass",
+    onSetPreset: (String) -> Unit = {},
+    bassStrength: Int = 850,
+    onSetBassStrength: (Int) -> Unit = {},
+    isBeatModeEnabled: Boolean = false,
+    onToggleBeatMode: (Boolean) -> Unit = {}
 ) {
     val song = playbackState.currentSong ?: return
     var sliderPosition by remember(playbackState.currentPositionMs) {
@@ -330,7 +338,11 @@ fun FullPlayerDialog(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
         ) {
-            Column(modifier = Modifier.padding(18.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -592,7 +604,7 @@ fun FullPlayerDialog(
                     }
 
                     // Sound EQ Preset Chip (cycle presets on click)
-                    val presets = listOf("Balanced", "Bass Boost", "Vocal Clear", "Treble Boost")
+                    val presets = listOf("Mega Bass", "Deep Bass", "Bass Boost", "Electronic", "Rock", "Vocal", "Balanced")
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -616,6 +628,101 @@ fun FullPlayerDialog(
                                 maxLines = 1
                             )
                         }
+                    }
+                }
+
+                // Deep Bass Boost Slider
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DarkSurfaceBorder.copy(alpha = 0.35f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.GraphicEq, contentDescription = null, tint = PrimaryCyan, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Deep Bass Boost", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryCyan)
+                        }
+                        Text(
+                            text = "${(bassStrength / 10)}%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = PrimaryCyan
+                        )
+                    }
+
+                    Slider(
+                        value = bassStrength.toFloat(),
+                        onValueChange = { onSetBassStrength(it.toInt()) },
+                        valueRange = 0f..1000f,
+                        steps = 19,
+                        colors = SliderDefaults.colors(
+                            thumbColor = PrimaryCyan,
+                            activeTrackColor = PrimaryCyan,
+                            inactiveTrackColor = DarkSurfaceBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // Beat Mode Haptics Toggle
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isBeatModeEnabled) SecondaryViolet.copy(alpha = 0.2f) else DarkSurfaceBorder.copy(alpha = 0.25f)
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        width = 1.dp,
+                        color = if (isBeatModeEnabled) SecondaryViolet else DarkSurfaceBorder
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                Icons.Default.Vibration,
+                                contentDescription = "Beat Mode",
+                                tint = if (isBeatModeEnabled) SecondaryViolet else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Beat Mode (Haptic Beats)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isBeatModeEnabled) SecondaryViolet else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isBeatModeEnabled) "Syncs vibration to bass & beats" else "Vibrate to bass & beats is off",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isBeatModeEnabled,
+                            onCheckedChange = onToggleBeatMode,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = PrimaryCyan,
+                                checkedTrackColor = SecondaryViolet.copy(alpha = 0.6f)
+                            )
+                        )
                     }
                 }
 

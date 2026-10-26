@@ -32,6 +32,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.view.KeyEvent
 import java.io.File
 
 data class PlaybackState(
@@ -41,13 +45,21 @@ data class PlaybackState(
     val durationMs: Long = 0L,
     val queueStats: FatigueQueueStats? = null,
     val engineStatus: SkipEngineStatus? = null,
-    val playbackSpeed: Float = 1.0f
+    val playbackSpeed: Float = 1.0f,
+    val isBeatModeEnabled: Boolean = false,
+    val currentSoundPreset: String = "Mega Bass",
+    val bassStrength: Int = 850
 )
 
 class AudioPlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     lateinit var player: ExoPlayer
+        private set
+
+    lateinit var audioEffectsManager: AudioEffectsManager
+        private set
+    lateinit var beatDetectorManager: BeatDetectorManager
         private set
 
     val fatigueQueue = FatiguePreventionQueue()
@@ -76,6 +88,19 @@ class AudioPlaybackService : MediaSessionService() {
 
     private var consecutiveMissingFileSkips = 0
 
+    // Earbud media button multi-tap detection (Single: Play/Pause, Double: Next, Triple: Prev)
+    private var mediaButtonClickCount = 0
+    private val mediaButtonHandler = Handler(Looper.getMainLooper())
+    private val mediaButtonRunnable = Runnable {
+        when (mediaButtonClickCount) {
+            1 -> togglePlayPause()
+            2 -> playNext()
+            3 -> playPrevious()
+            else -> if (mediaButtonClickCount > 3) playPrevious()
+        }
+        mediaButtonClickCount = 0
+    }
+
     inner class PlaybackBinder : Binder() {
         fun getService(): AudioPlaybackService = this@AudioPlaybackService
     }
@@ -99,6 +124,9 @@ class AudioPlaybackService : MediaSessionService() {
             scope = serviceScope
         )
 
+        audioEffectsManager = AudioEffectsManager(applicationContext)
+        beatDetectorManager = BeatDetectorManager(applicationContext)
+
         player = ExoPlayer.Builder(this)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -109,7 +137,20 @@ class AudioPlaybackService : MediaSessionService() {
             )
             .build()
 
+        val initialSessionId = player.audioSessionId
+        if (initialSessionId != C.AUDIO_SESSION_ID_UNSET) {
+            audioEffectsManager.attachToAudioSession(initialSessionId)
+            beatDetectorManager.attachToAudioSession(initialSessionId)
+        }
+
         player.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                if (audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+                    audioEffectsManager.attachToAudioSession(audioSessionId)
+                    beatDetectorManager.attachToAudioSession(audioSessionId)
+                }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateState()
             }
@@ -167,7 +208,64 @@ class AudioPlaybackService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
-            .setCallback(object : MediaSession.Callback {})
+            .setCallback(object : MediaSession.Callback {
+                override fun onMediaButtonEvent(
+                    session: MediaSession,
+                    controllerInfo: MediaSession.ControllerInfo,
+                    intent: Intent
+                ): Boolean {
+                    val keyEvent: KeyEvent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+                    }
+
+                    if (keyEvent != null) {
+                        if (keyEvent.action == KeyEvent.ACTION_DOWN) {
+                            when (keyEvent.keyCode) {
+                                KeyEvent.KEYCODE_HEADSETHOOK,
+                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                                KeyEvent.KEYCODE_MEDIA_PLAY,
+                                KeyEvent.KEYCODE_MEDIA_PAUSE,
+                                KeyEvent.KEYCODE_MEDIA_NEXT,
+                                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> return true
+                            }
+                        } else if (keyEvent.action == KeyEvent.ACTION_UP) {
+                            when (keyEvent.keyCode) {
+                                KeyEvent.KEYCODE_HEADSETHOOK,
+                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                                    mediaButtonHandler.removeCallbacks(mediaButtonRunnable)
+                                    mediaButtonClickCount++
+                                    if (mediaButtonClickCount >= 3) {
+                                        mediaButtonHandler.post(mediaButtonRunnable)
+                                    } else {
+                                        mediaButtonHandler.postDelayed(mediaButtonRunnable, 350L)
+                                    }
+                                    return true
+                                }
+                                KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                                    if (!player.isPlaying) togglePlayPause()
+                                    return true
+                                }
+                                KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                                    if (player.isPlaying) pause()
+                                    return true
+                                }
+                                KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                                    playNext()
+                                    return true
+                                }
+                                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                                    playPrevious()
+                                    return true
+                                }
+                            }
+                        }
+                    }
+                    return super.onMediaButtonEvent(session, controllerInfo, intent)
+                }
+            })
             .build()
     }
 
@@ -286,6 +384,27 @@ class AudioPlaybackService : MediaSessionService() {
         updateState()
     }
 
+    fun setSoundPreset(presetName: String) {
+        if (::audioEffectsManager.isInitialized) {
+            audioEffectsManager.applyPreset(presetName)
+            updateState()
+        }
+    }
+
+    fun setBassBoostStrength(strength: Int) {
+        if (::audioEffectsManager.isInitialized) {
+            audioEffectsManager.setBassStrength(strength)
+            updateState()
+        }
+    }
+
+    fun setBeatModeEnabled(enabled: Boolean) {
+        if (::beatDetectorManager.isInitialized) {
+            beatDetectorManager.setBeatModeEnabled(enabled)
+            updateState()
+        }
+    }
+
     fun updateState() {
         _playbackState.value = PlaybackState(
             currentSong = fatigueQueue.currentSong,
@@ -294,11 +413,21 @@ class AudioPlaybackService : MediaSessionService() {
             durationMs = if (player.duration > 0) player.duration else (fatigueQueue.currentSong?.durationMs ?: 0L),
             queueStats = fatigueQueue.getStats(),
             engineStatus = skipRecommendationEngine.engineStatus.value,
-            playbackSpeed = player.playbackParameters.speed
+            playbackSpeed = player.playbackParameters.speed,
+            isBeatModeEnabled = if (::beatDetectorManager.isInitialized) beatDetectorManager.isBeatModeEnabled else false,
+            currentSoundPreset = if (::audioEffectsManager.isInitialized) audioEffectsManager.currentPreset else "Mega Bass",
+            bassStrength = if (::audioEffectsManager.isInitialized) audioEffectsManager.bassStrength else 850
         )
     }
 
     override fun onDestroy() {
+        mediaButtonHandler.removeCallbacksAndMessages(null)
+        if (::beatDetectorManager.isInitialized) {
+            beatDetectorManager.release()
+        }
+        if (::audioEffectsManager.isInitialized) {
+            audioEffectsManager.release()
+        }
         if (isReceiverRegistered) {
             try {
                 unregisterReceiver(becomingNoisyReceiver)

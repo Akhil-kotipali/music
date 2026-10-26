@@ -28,7 +28,8 @@ class AudioIndexerApp : Application() {
             context = this,
             keyConfigDao = database.aiKeyConfigDao(),
             logDao = database.aiLogDao(),
-            songDao = database.songDao()
+            songDao = database.songDao(),
+            categoryDao = database.categoryDao()
         )
     }
 

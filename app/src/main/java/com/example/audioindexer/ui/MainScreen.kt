@@ -22,8 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlayArrow
@@ -32,12 +34,17 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Vibration
 import android.widget.Toast
 import com.example.audioindexer.ui.components.PlaylistsTab
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.ui.components.AiCategorizationPrompt
 import com.example.audioindexer.ui.components.AiManagerTab
+import com.example.audioindexer.ui.components.CategoryManagementDialog
 import com.example.audioindexer.ui.components.FullPlayerDialog
 import com.example.audioindexer.ui.components.MiniPlaybackBar
 import com.example.audioindexer.ui.components.PermissionCard
@@ -142,6 +150,10 @@ fun MainScreen(
     val currentSoundPreset by viewModel.currentSoundPreset.collectAsState()
     val userNotification by viewModel.userNotification.collectAsState()
 
+    // Categories
+    val categories by viewModel.categories.collectAsState()
+    var showCategoryDialog by remember { mutableStateOf(false) }
+
     androidx.compose.runtime.LaunchedEffect(userNotification) {
         userNotification?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
@@ -186,6 +198,13 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showCategoryDialog = true }) {
+                        Icon(
+                            Icons.Default.Category,
+                            contentDescription = "Categories",
+                            tint = PrimaryCyan
+                        )
+                    }
                     IconButton(onClick = { viewModel.refreshState(context) }) {
                         Icon(
                             Icons.Default.Tune,
@@ -347,7 +366,9 @@ fun MainScreen(
                     onDeletePlaylist = { viewModel.deletePlaylist(it) },
                     onRemoveSongFromPlaylist = { plId, sId -> viewModel.removeSongFromPlaylist(plId, sId) },
                     onCreateCategoryPlaylist = { n, d, c, cb -> viewModel.createCategoryPlaylist(n, d, c, cb) },
-                    onCreateCustomPlaylist = { n, d, ids, cb -> viewModel.createCustomPlaylist(n, d, ids, cb) }
+                    onCreateCustomPlaylist = { n, d, ids, cb -> viewModel.createCustomPlaylist(n, d, ids, cb) },
+                    availableCategories = categories,
+                    onManageCategories = { showCategoryDialog = true }
                 )
                 2 -> StagingTab(
                     stagedSongs = stagedSongs,
@@ -387,7 +408,14 @@ fun MainScreen(
                     onToggleObserver = { viewModel.toggleObserver(context, it) },
                     onRequestStandardPermissions = onRequestStandardPermissions,
                     onRequestManageStorage = onRequestManageStorage,
-                    onClearDatabase = { viewModel.clearAllIndexedSongs() }
+                    onClearDatabase = { viewModel.clearAllIndexedSongs() },
+                    isBeatModeEnabled = playbackState.isBeatModeEnabled,
+                    onToggleBeatMode = { viewModel.toggleBeatMode(it) },
+                    bassStrength = playbackState.bassStrength,
+                    onSetBassStrength = { viewModel.setBassBoostStrength(it) },
+                    currentPreset = playbackState.currentSoundPreset,
+                    onSetPreset = { viewModel.setSoundPreset(it) },
+                    onManageCategories = { showCategoryDialog = true }
                 )
             }
         }
@@ -402,7 +430,9 @@ fun MainScreen(
             viewModel.selectedStagedSong.value = null
         },
         onPlay = { viewModel.playSong(it) },
-        onPromoteStaged = { viewModel.promoteStagedSong(it) }
+        onPromoteStaged = { viewModel.promoteStagedSong(it) },
+        availableCategories = categories,
+        onUpdateCategory = { songId, newCat -> viewModel.updateSongCategory(songId, newCat) }
     )
 
     // Full Player Modal with Fatigue Prevention Queue & Enhanced UX
@@ -421,8 +451,25 @@ fun MainScreen(
             sleepTimerRemainingSec = sleepTimerRemainingSec,
             onStartSleepTimer = { viewModel.startSleepTimer(it) },
             onCancelSleepTimer = { viewModel.cancelSleepTimer() },
-            currentPreset = currentSoundPreset,
-            onSetPreset = { viewModel.setSoundPreset(it) }
+            currentPreset = playbackState.currentSoundPreset,
+            onSetPreset = { viewModel.setSoundPreset(it) },
+            bassStrength = playbackState.bassStrength,
+            onSetBassStrength = { viewModel.setBassBoostStrength(it) },
+            isBeatModeEnabled = playbackState.isBeatModeEnabled,
+            onToggleBeatMode = { viewModel.toggleBeatMode(it) }
+        )
+    }
+
+    // Category Management Dialog (define from scratch, add, delete, reset)
+    if (showCategoryDialog) {
+        CategoryManagementDialog(
+            categories = categories,
+            allSongs = songs,
+            onDismiss = { showCategoryDialog = false },
+            onAddCategory = { n, d, c -> viewModel.addCategory(n, d, c) },
+            onDeleteCategory = { cat -> viewModel.deleteCategory(cat) },
+            onResetToDefaults = { viewModel.resetCategoriesToDefault() },
+            onClearAllCategories = { viewModel.clearAllCategories() }
         )
     }
 }
@@ -753,13 +800,157 @@ private fun ScannerTab(
     onToggleObserver: (Boolean) -> Unit,
     onRequestStandardPermissions: () -> Unit,
     onRequestManageStorage: () -> Unit,
-    onClearDatabase: () -> Unit
+    onClearDatabase: () -> Unit,
+    isBeatModeEnabled: Boolean,
+    onToggleBeatMode: (Boolean) -> Unit,
+    bassStrength: Int,
+    onSetBassStrength: (Int) -> Unit,
+    currentPreset: String,
+    onSetPreset: (String) -> Unit,
+    onManageCategories: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 14.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Sound, Equalizer & Beat Mode Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Tune, contentDescription = null, tint = PrimaryCyan, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Sound, Equalizer & Beat Mode",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Beat Mode Haptics Toggle
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isBeatModeEnabled) SecondaryViolet.copy(alpha = 0.25f) else DarkSurfaceBorder.copy(alpha = 0.3f)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isBeatModeEnabled) SecondaryViolet else DarkSurfaceBorder
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(
+                                    Icons.Default.Vibration,
+                                    contentDescription = "Beat Mode",
+                                    tint = if (isBeatModeEnabled) SecondaryViolet else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Beat Mode (Haptic Feedback)",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = if (isBeatModeEnabled) SecondaryViolet else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Detects highs, beats & bass in real-time and pulses haptic vibrations",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = isBeatModeEnabled,
+                                onCheckedChange = onToggleBeatMode,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = PrimaryCyan,
+                                    checkedTrackColor = SecondaryViolet.copy(alpha = 0.6f)
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Deep Bass Boost Slider
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkSurfaceBorder.copy(alpha = 0.35f))
+                            .padding(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = PrimaryCyan, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Mega Bass Boost Strength", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PrimaryCyan)
+                            }
+                            Text(
+                                text = "${(bassStrength / 10)}%",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = PrimaryCyan
+                            )
+                        }
+
+                        Slider(
+                            value = bassStrength.toFloat(),
+                            onValueChange = { onSetBassStrength(it.toInt()) },
+                            valueRange = 0f..1000f,
+                            steps = 19,
+                            colors = SliderDefaults.colors(
+                                thumbColor = PrimaryCyan,
+                                activeTrackColor = PrimaryCyan,
+                                inactiveTrackColor = DarkSurfaceBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Categories Management Entry Button
+                    OutlinedButton(
+                        onClick = onManageCategories,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(16.dp), tint = PrimaryCyan)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Define & Manage Categories from Scratch", fontSize = 12.sp, color = PrimaryCyan)
+                    }
+                }
+            }
+        }
+
         item {
             ScanControlsCard(
                 serviceStatus = serviceStatus,

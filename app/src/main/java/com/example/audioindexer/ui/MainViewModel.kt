@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audioindexer.AudioIndexerApp
 import com.example.audioindexer.data.model.AiKeyConfig
 import com.example.audioindexer.data.model.AiLog
+import com.example.audioindexer.data.model.Category
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.data.model.StagedSong
 import com.example.audioindexer.data.repository.AudioRepository
@@ -94,6 +95,13 @@ class MainViewModel(
 
     val uncategorizedCount: StateFlow<Int> = database.songDao().getUncategorizedCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    // Categories
+    val categories: StateFlow<List<Category>> = database.categoryDao().getAllCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val distinctUsedCategories: StateFlow<List<String>> = database.songDao().getDistinctUsedCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Playlists
     val playlists: StateFlow<List<Playlist>> = database.playlistDao().getAllPlaylists()
@@ -492,15 +500,23 @@ class MainViewModel(
         }
     }
 
-    fun createCategoryPlaylist(name: String, description: String, category: String, onComplete: (Boolean, String) -> Unit) {
+    fun createCategoryPlaylist(name: String, description: String, categories: List<String>, onComplete: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             try {
-                val matching = database.songDao().getSongsByCategoryDirect(category)
-                if (matching.isEmpty()) {
-                    onComplete(false, "No songs categorized under '$category'")
+                if (categories.isEmpty()) {
+                    onComplete(false, "Please select at least one category")
                     return@launch
                 }
-                val desc = description.ifBlank { "Auto-populated $category songs (${matching.size} tracks)" }
+                val matching = if (categories.size == 1) {
+                    database.songDao().getSongsByCategoryDirect(categories.first())
+                } else {
+                    database.songDao().getSongsByCategoriesDirect(categories)
+                }
+                if (matching.isEmpty()) {
+                    onComplete(false, "No songs categorized under '${categories.joinToString(", ")}'")
+                    return@launch
+                }
+                val desc = description.ifBlank { "Auto-populated ${categories.joinToString(", ")} songs (${matching.size} tracks)" }
                 val playlist = Playlist(name = name.trim(), description = desc)
                 val playlistId = database.playlistDao().insertPlaylist(playlist)
                 val maps = matching.map { song ->
@@ -517,6 +533,10 @@ class MainViewModel(
                 onComplete(false, e.message ?: "Failed to create playlist")
             }
         }
+    }
+
+    fun createCategoryPlaylist(name: String, description: String, category: String, onComplete: (Boolean, String) -> Unit) {
+        createCategoryPlaylist(name, description, listOf(category), onComplete)
     }
 
     fun createCustomPlaylist(name: String, description: String, songIds: List<Long>, onComplete: (Boolean, String) -> Unit) {
@@ -608,7 +628,89 @@ class MainViewModel(
 
     fun setSoundPreset(preset: String) {
         currentSoundPreset.value = preset
-        userNotification.value = "Audio preset applied: $preset"
+        playbackService?.setSoundPreset(preset)
+        userNotification.value = "Audio preset: $preset"
+    }
+
+    fun setBassBoostStrength(strength: Int) {
+        playbackService?.setBassBoostStrength(strength)
+        userNotification.value = "Bass Boost: ${(strength / 10)}%"
+    }
+
+    fun toggleBeatMode(enable: Boolean) {
+        playbackService?.setBeatModeEnabled(enable)
+        userNotification.value = if (enable) "Beat Mode (Haptic Beats) ON" else "Beat Mode OFF"
+    }
+
+    // --- Song Category & Category Management ---
+
+    fun updateSongCategory(songId: Long, newCategory: String?) {
+        viewModelScope.launch {
+            database.songDao().updateAiCategory(songId, newCategory)
+            userNotification.value = "Category set to '${newCategory ?: "Uncategorized"}'"
+            selectedSong.value?.let { current ->
+                if (current.id == songId) {
+                    selectedSong.value = current.copy(aiCategory = newCategory)
+                }
+            }
+        }
+    }
+
+    fun addCategory(name: String, description: String = "", colorHex: String = "#FF6B6B", onComplete: ((Boolean, String) -> Unit)? = null) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) {
+            onComplete?.invoke(false, "Category name cannot be blank")
+            return
+        }
+        viewModelScope.launch {
+            val existing = database.categoryDao().getCategoryByName(trimmed)
+            if (existing != null) {
+                onComplete?.invoke(false, "Category '$trimmed' already exists")
+                return@launch
+            }
+            val newCat = Category(
+                name = trimmed,
+                description = description.trim(),
+                colorHex = colorHex,
+                isDefault = false
+            )
+            database.categoryDao().insert(newCat)
+            userNotification.value = "Category '$trimmed' created"
+            onComplete?.invoke(true, "Category '$trimmed' created")
+        }
+    }
+
+    fun deleteCategory(category: Category, onComplete: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            database.categoryDao().delete(category)
+            userNotification.value = "Category '${category.name}' deleted"
+            onComplete?.invoke(true, "Category '${category.name}' deleted")
+        }
+    }
+
+    fun resetCategoriesToDefault() {
+        viewModelScope.launch {
+            database.categoryDao().deleteAll()
+            val defaults = listOf(
+                Category(name = "Love", description = "Romantic, warm, melodic", colorHex = "#FF4081", isDefault = true),
+                Category(name = "Motivational", description = "Uplifting, inspiring anthems", colorHex = "#FF9800", isDefault = true),
+                Category(name = "Sad", description = "Melancholic, emotional, slow", colorHex = "#3F51B5", isDefault = true),
+                Category(name = "High Energy", description = "Fast, upbeat, dance, workout", colorHex = "#E91E63", isDefault = true),
+                Category(name = "Relaxed", description = "Calm, ambient, chill, acoustic", colorHex = "#009688", isDefault = true),
+                Category(name = "Focus", description = "Instrumental, study, concentration", colorHex = "#673AB7", isDefault = true)
+            )
+            for (cat in defaults) {
+                database.categoryDao().insert(cat)
+            }
+            userNotification.value = "Categories reset to default"
+        }
+    }
+
+    fun clearAllCategories() {
+        viewModelScope.launch {
+            database.categoryDao().deleteAll()
+            userNotification.value = "All categories cleared. Define new ones from scratch!"
+        }
     }
 
     fun startSleepTimer(minutes: Int) {

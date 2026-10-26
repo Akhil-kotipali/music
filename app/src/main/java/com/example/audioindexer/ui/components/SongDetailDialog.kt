@@ -15,10 +15,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
@@ -30,7 +34,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,8 +49,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.audioindexer.data.model.Category
 import com.example.audioindexer.data.model.Song
 import com.example.audioindexer.data.model.StagedSong
+import com.example.audioindexer.ui.theme.AccentOrange
 import com.example.audioindexer.ui.theme.DarkSurfaceBorder
 import com.example.audioindexer.ui.theme.PrimaryCyan
 import com.example.audioindexer.ui.theme.SecondaryViolet
@@ -53,7 +65,9 @@ fun SongDetailDialog(
     stagedSong: StagedSong?,
     onDismiss: () -> Unit,
     onPlay: ((Song) -> Unit)? = null,
-    onPromoteStaged: ((StagedSong) -> Unit)? = null
+    onPromoteStaged: ((StagedSong) -> Unit)? = null,
+    availableCategories: List<Category> = emptyList(),
+    onUpdateCategory: ((songId: Long, newCategory: String?) -> Unit)? = null
 ) {
     if (song == null && stagedSong == null) return
 
@@ -125,25 +139,94 @@ fun SongDetailDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // AI Category Pill
-                if (!aiCategory.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(SecondaryViolet.copy(alpha = 0.25f))
-                                .border(1.dp, SecondaryViolet.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                // AI Category Pill & Category Changer
+                var isEditingCategory by remember { mutableStateOf(false) }
+                var currentCat by remember(song?.aiCategory) { mutableStateOf(song?.aiCategory) }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SecondaryViolet.copy(alpha = 0.25f))
+                            .border(1.dp, SecondaryViolet.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = PrimaryCyan, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (!currentCat.isNullOrBlank()) "Mood: $currentCat" else "Uncategorized",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = PrimaryCyan
+                            )
+                        }
+                    }
+
+                    if (song != null && onUpdateCategory != null) {
+                        TextButton(
+                            onClick = { isEditingCategory = !isEditingCategory },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = PrimaryCyan, modifier = Modifier.size(12.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp), tint = PrimaryCyan)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (isEditingCategory) "Done" else "Change", fontSize = 11.sp, color = PrimaryCyan)
+                        }
+                    }
+                }
+
+                if (isEditingCategory && song != null && onUpdateCategory != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Select Category:", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        item {
+                            val isSelected = currentCat == null
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) AccentOrange else DarkSurfaceBorder.copy(alpha = 0.4f))
+                                    .clickable {
+                                        currentCat = null
+                                        onUpdateCategory(song.id, null)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
                                 Text(
-                                    text = "AI Mood: $aiCategory",
+                                    text = "None",
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = PrimaryCyan
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        val cats = if (availableCategories.isNotEmpty()) availableCategories.map { it.name } else listOf("Love", "Motivational", "Sad", "High Energy", "Relaxed", "Focus")
+                        items(cats) { catName ->
+                            val isSelected = currentCat?.equals(catName, ignoreCase = true) == true
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) PrimaryCyan else DarkSurfaceBorder.copy(alpha = 0.4f))
+                                    .clickable {
+                                        currentCat = catName
+                                        onUpdateCategory(song.id, catName)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = catName,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }

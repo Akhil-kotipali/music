@@ -19,6 +19,8 @@ enum class EngineStateMode {
     NORMAL,
     SHORT_TERM_PIVOT,
     CONTRASTED_FILTER,
+    MOOD_MISMATCH,
+    MOOD_ALIGNMENT,
     HUNTING_MODE
 }
 
@@ -35,14 +37,15 @@ data class SkipEngineStatus(
  *
  * Real-time skip intelligence engine:
  * 1. Hard Skip detection: Clicks 'Next' within first 15 seconds (< 15,000ms).
- * 2. Short-Term Pivot:
- *    - Consecutive Hard Skip = 1: Instantly pivots upcoming queue away from that song's ai_category.
- *    - Consecutive Hard Skip >= 2: Narrows queue pool aggressively to highly contrasted categories.
- *    - 4+ Rapid Skips: Enters 'Hunting Mode' (user looking for a specific song) -> temporarily suspends category penalties.
- * 3. Long-Term Pruning:
+ * 2. Mood Mismatch & Alignment:
+ *    - Recognizes that consecutive skips often mean a mood is currently irrelevant, NOT hunting mode.
+ *    - Pivots queue away from the rejected mood to align with user's desired state.
+ * 3. Short-Term Pivot & Contrasting:
+ *    - Narrows queue pool dynamically while preserving playlist intent.
+ *    - Distinguishes rapid song searching (Hunting Mode across 5+ diverse tracks) from mood mismatch.
+ * 4. Long-Term Pruning:
  *    - Tracks skip_count and play_count per playlist in the database.
- *    - If skip-to-play ratio > 80% after appearing >= 5 times, automatically removes the song from that playlist map
- *      and notifies the user via a Toast notification.
+ *    - If skip-to-play ratio > 80% after appearing >= 5 times, automatically removes the song from that playlist map.
  */
 class SkipRecommendationEngine(
     private val context: Context? = null,
@@ -52,7 +55,7 @@ class SkipRecommendationEngine(
 ) {
     companion object {
         const val HARD_SKIP_THRESHOLD_MS = 15_000L // 15 seconds
-        const val RAPID_SKIP_WINDOW_MS = 20_000L   // 20-second rolling window for 4 rapid skips
+        const val RAPID_SKIP_WINDOW_MS = 15_000L   // 15-second rolling window
         const val PRUNE_MIN_APPEARANCES = 5        // Minimum 5 appearances
         const val PRUNE_SKIP_RATIO = 0.80          // 80% skip-to-play ratio threshold
 
@@ -69,6 +72,7 @@ class SkipRecommendationEngine(
 
     private var consecutiveHardSkips = 0
     private val rapidSkipTimestamps = mutableListOf<Long>()
+    private val recentSkippedCategories = mutableListOf<String>()
     private var isHuntingMode = false
     private var lastSkippedCategory: String? = null
 
@@ -78,7 +82,7 @@ class SkipRecommendationEngine(
     /**
      * Called whenever user clicks 'Next'.
      * Analyzes playback duration to determine if it is a Hard Skip (<15s) and applies
-     * Short-Term Pivot, Hunting Mode, or Long-Term Pruning.
+     * Mood Alignment, Short-Term Pivot, Hunting Mode, or Long-Term Pruning.
      *
      * Returns the reordered/filtered upcoming queue.
      */
@@ -90,13 +94,25 @@ class SkipRecommendationEngine(
     ): List<Song> {
         val now = System.currentTimeMillis()
         val isHardSkip = currentPositionMs < HARD_SKIP_THRESHOLD_MS
+        val skippedCategory = currentSong.aiCategory
 
         // Track rolling window for rapid skipping
         rapidSkipTimestamps.add(now)
         rapidSkipTimestamps.removeAll { now - it > RAPID_SKIP_WINDOW_MS }
 
-        // Check Hunting Mode: 4+ skips in rapid succession
-        if (rapidSkipTimestamps.size >= 4) {
+        if (!skippedCategory.isNullOrBlank()) {
+            recentSkippedCategories.add(skippedCategory)
+            if (recentSkippedCategories.size > 6) {
+                recentSkippedCategories.removeAt(0)
+            }
+        }
+
+        // Check if skips indicate Mood Irrelevance (same mood skipped 2+ times)
+        val isMoodMismatch = !skippedCategory.isNullOrBlank() &&
+                recentSkippedCategories.takeLast(3).count { it.equals(skippedCategory, ignoreCase = true) } >= 2
+
+        // True Hunting Mode: 5+ rapid skips across diverse categories in under 15 seconds
+        if (rapidSkipTimestamps.size >= 5 && !isMoodMismatch) {
             isHuntingMode = true
             _engineStatus.value = SkipEngineStatus(
                 mode = EngineStateMode.HUNTING_MODE,
@@ -105,26 +121,37 @@ class SkipRecommendationEngine(
                 lastSkippedCategory = lastSkippedCategory,
                 lastActionDescription = "Hunting Mode: User rapidly seeking track. Category penalties suspended."
             )
-            // Long-term DB pruning still tracks if in a playlist
             if (playlistId != null) {
                 recordSkipAndCheckPrune(playlistId, currentSong)
             }
-            return upcomingQueue // No queue reordering penalty in hunting mode
+            return upcomingQueue
         }
 
         if (isHardSkip) {
             consecutiveHardSkips++
-            val skippedCategory = currentSong.aiCategory
             lastSkippedCategory = skippedCategory
 
-            // Handle Long-Term DB Pruning
+            // Long-term DB Pruning tracking
             if (playlistId != null) {
                 recordSkipAndCheckPrune(playlistId, currentSong)
             }
 
-            // Short-Term Pivot Behaviors
+            // 1. Mood Mismatch handling: User is rejecting this specific mood, not hunting
+            if (isMoodMismatch && !skippedCategory.isNullOrBlank()) {
+                val reordered = applyPivotAway(upcomingQueue, skippedCategory)
+                _engineStatus.value = SkipEngineStatus(
+                    mode = EngineStateMode.MOOD_MISMATCH,
+                    consecutiveHardSkips = consecutiveHardSkips,
+                    isHuntingMode = false,
+                    lastSkippedCategory = skippedCategory,
+                    lastActionDescription = "Mood Adjustment: Skipped '$skippedCategory' (irrelevant to mood). Reprioritizing alternative moods."
+                )
+                return reordered
+            }
+
+            // 2. Short-Term Pivot Behaviors
             return if (consecutiveHardSkips >= 2 && !skippedCategory.isNullOrBlank()) {
-                // Consecutive hard skip >= 2: Aggressive contrast
+                // Consecutive hard skip >= 2: Contrast
                 val contrasted = CONTRASTED_CATEGORIES[skippedCategory] ?: emptyList()
                 val reordered = applyContrastedFilter(upcomingQueue, contrasted, skippedCategory)
 
@@ -133,7 +160,7 @@ class SkipRecommendationEngine(
                     consecutiveHardSkips = consecutiveHardSkips,
                     isHuntingMode = false,
                     lastSkippedCategory = skippedCategory,
-                    lastActionDescription = "Aggressive Contrast: Hard skipped '$skippedCategory'. Prioritizing: ${contrasted.joinToString()}."
+                    lastActionDescription = "Contrasted Filter: Hard skipped '$skippedCategory'. Prioritizing: ${contrasted.joinToString()}."
                 )
                 reordered
             } else if (consecutiveHardSkips == 1 && !skippedCategory.isNullOrBlank()) {
@@ -152,7 +179,7 @@ class SkipRecommendationEngine(
                 upcomingQueue
             }
         } else {
-            // Normal skip (>15s): Not a hard skip, reset consecutive penalty
+            // Soft skip (>15s): Normal queue progression
             consecutiveHardSkips = 0
             isHuntingMode = false
             _engineStatus.value = SkipEngineStatus(
@@ -172,6 +199,7 @@ class SkipRecommendationEngine(
         consecutiveHardSkips = 0
         isHuntingMode = false
         rapidSkipTimestamps.clear()
+        recentSkippedCategories.clear()
 
         _engineStatus.value = SkipEngineStatus(
             mode = EngineStateMode.NORMAL,
