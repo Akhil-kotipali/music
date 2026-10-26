@@ -6,6 +6,8 @@ import com.example.audioindexer.data.model.StagedSong
 import java.io.File
 import java.util.Locale
 
+import com.example.audioindexer.util.AudioClassifier
+
 data class AudioMetadata(
     val filePath: String,
     val title: String,
@@ -14,14 +16,17 @@ data class AudioMetadata(
     val lyricsSnippet: String,
     val durationMs: Long,
     val fileSize: Long,
-    val extension: String
+    val extension: String,
+    val isMusic: Boolean = true,
+    val audioType: String = "MUSIC",
+    val classificationReason: String = ""
 )
 
 object MetadataExtractor {
 
     /**
-     * Extracts audio metadata using MediaMetadataRetriever with reliable fallbacks.
-     * Contains the placeholder text field for lyricsSnippet as requested.
+     * Extracts audio metadata using MediaMetadataRetriever and AudioClassifier.
+     * Intelligently distinguishes genuine songs from voice notes, ringtones, and recordings.
      */
     fun extract(file: File): AudioMetadata {
         var title: String? = null
@@ -51,6 +56,16 @@ object MetadataExtractor {
         val resolvedArtist = if (!artist.isNullOrBlank()) artist.trim() else "Unknown Artist"
         val resolvedAlbum = if (!album.isNullOrBlank()) album.trim() else (file.parentFile?.name ?: "Unknown Album")
 
+        // Intelligent song vs non-song classification
+        val classification = AudioClassifier.classify(
+            file = file,
+            durationMs = durationMs,
+            fileSize = fileSize,
+            title = resolvedTitle,
+            artist = resolvedArtist,
+            album = resolvedAlbum
+        )
+
         // Placeholder text field for lyricsSnippet
         val lyricsSnippet = "Placeholder: Lyrics for '$resolvedTitle' by $resolvedArtist (pending indexer parse)"
 
@@ -62,7 +77,10 @@ object MetadataExtractor {
             lyricsSnippet = lyricsSnippet,
             durationMs = durationMs,
             fileSize = fileSize,
-            extension = ext
+            extension = ext,
+            isMusic = classification.isSong,
+            audioType = classification.type.name,
+            classificationReason = classification.reason
         )
     }
 
@@ -73,6 +91,8 @@ object MetadataExtractor {
             artist = metadata.artist,
             album = metadata.album,
             lyricsSnippet = metadata.lyricsSnippet,
+            isMusic = metadata.isMusic,
+            audioType = metadata.audioType,
             durationMs = metadata.durationMs,
             fileSize = metadata.fileSize,
             extension = metadata.extension,
@@ -87,6 +107,8 @@ object MetadataExtractor {
             artist = metadata.artist,
             album = metadata.album,
             lyricsSnippet = metadata.lyricsSnippet,
+            isMusic = metadata.isMusic,
+            audioType = metadata.audioType,
             durationMs = metadata.durationMs,
             fileSize = metadata.fileSize,
             extension = metadata.extension,

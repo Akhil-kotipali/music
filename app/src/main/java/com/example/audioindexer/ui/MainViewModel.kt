@@ -34,6 +34,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
 
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(
     private val repository: AudioRepository,
@@ -42,12 +45,25 @@ class MainViewModel(
 ) : ViewModel() {
 
     val searchQuery = MutableStateFlow("")
+    val filterMusicOnly = MutableStateFlow(true)
 
-    val songs: StateFlow<List<Song>> = searchQuery.flatMapLatest { query ->
-        if (query.isBlank()) {
-            repository.allSongs
+    val songs: StateFlow<List<Song>> = combine(
+        searchQuery,
+        filterMusicOnly
+    ) { query, musicOnly ->
+        Pair(query, musicOnly)
+    }.flatMapLatest { (query, musicOnly) ->
+        val baseFlow = if (musicOnly) {
+            database.songDao().getMusicSongs()
         } else {
-            repository.searchSongs(query)
+            repository.allSongs
+        }
+        if (query.isBlank()) {
+            baseFlow
+        } else {
+            repository.searchSongs(query).map { list ->
+                if (musicOnly) list.filter { it.isMusic } else list
+            }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -55,6 +71,12 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val songCount: StateFlow<Int> = repository.songCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val musicSongCount: StateFlow<Int> = database.songDao().getMusicSongCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val nonMusicCount: StateFlow<Int> = database.songDao().getNonMusicCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val stagedCount: StateFlow<Int> = repository.stagedCount

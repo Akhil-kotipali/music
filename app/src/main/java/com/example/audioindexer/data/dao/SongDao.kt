@@ -15,8 +15,14 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY dateAdded DESC")
     fun getAllSongs(): Flow<List<Song>>
 
+    @Query("SELECT * FROM songs WHERE is_music = 1 ORDER BY dateAdded DESC")
+    fun getMusicSongs(): Flow<List<Song>>
+
     @Query("SELECT * FROM songs ORDER BY dateAdded DESC")
     suspend fun getAllSongsDirect(): List<Song>
+
+    @Query("SELECT * FROM songs WHERE is_music = 1 ORDER BY dateAdded DESC")
+    suspend fun getMusicSongsDirect(): List<Song>
 
     @Query("SELECT * FROM songs WHERE filePath = :filePath LIMIT 1")
     suspend fun getSongByPath(filePath: String): Song?
@@ -30,13 +36,19 @@ interface SongDao {
     @Query("SELECT COUNT(*) FROM songs")
     fun getSongCount(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM songs WHERE is_music = 1")
+    fun getMusicSongCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM songs WHERE is_music = 0")
+    fun getNonMusicCount(): Flow<Int>
+
     @Query("SELECT COUNT(*) FROM songs")
     suspend fun getSongCountDirect(): Int
 
-    @Query("SELECT * FROM songs WHERE ai_category IS NULL OR ai_category = ''")
+    @Query("SELECT * FROM songs WHERE is_music = 1 AND (ai_category IS NULL OR ai_category = '')")
     suspend fun getSongsWithoutAiCategory(): List<Song>
 
-    @Query("SELECT COUNT(*) FROM songs WHERE ai_category IS NULL OR ai_category = ''")
+    @Query("SELECT COUNT(*) FROM songs WHERE is_music = 1 AND (ai_category IS NULL OR ai_category = '')")
     fun getUncategorizedCount(): Flow<Int>
 
     @Query("SELECT * FROM songs WHERE ai_category = :category ORDER BY title ASC")

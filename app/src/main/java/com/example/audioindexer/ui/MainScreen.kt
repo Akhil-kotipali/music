@@ -119,6 +119,10 @@ fun MainScreen(
     val selectedSong by viewModel.selectedSong.collectAsState()
     val selectedStagedSong by viewModel.selectedStagedSong.collectAsState()
 
+    val filterMusicOnly by viewModel.filterMusicOnly.collectAsState()
+    val musicSongCount by viewModel.musicSongCount.collectAsState()
+    val nonMusicCount by viewModel.nonMusicCount.collectAsState()
+
     var selectedTabIndex by remember { mutableIntStateOf(0) }
 
     Scaffold(
@@ -275,6 +279,10 @@ fun MainScreen(
                 0 -> LibraryTab(
                     songs = songs,
                     searchQuery = searchQuery,
+                    filterMusicOnly = filterMusicOnly,
+                    musicSongCount = musicSongCount,
+                    nonMusicCount = nonMusicCount,
+                    totalAudioCount = songCount,
                     uncategorizedCount = uncategorizedCount,
                     showAiPrompt = showAiPrompt,
                     isAiCategorizing = isAiCategorizing,
@@ -284,6 +292,7 @@ fun MainScreen(
                     onApproveAi = { viewModel.startAiCategorization() },
                     onDismissAiPrompt = { viewModel.showAiPrompt.value = false },
                     onSearchChange = { viewModel.searchQuery.value = it },
+                    onToggleMusicFilter = { viewModel.filterMusicOnly.value = it },
                     onSongClick = { viewModel.selectedSong.value = it },
                     onPlaySong = { viewModel.playSong(it) },
                     onStartScanClick = { viewModel.triggerFullScan(context) }
@@ -359,6 +368,10 @@ fun MainScreen(
 private fun LibraryTab(
     songs: List<Song>,
     searchQuery: String,
+    filterMusicOnly: Boolean,
+    musicSongCount: Int,
+    nonMusicCount: Int,
+    totalAudioCount: Int,
     uncategorizedCount: Int,
     showAiPrompt: Boolean,
     isAiCategorizing: Boolean,
@@ -368,6 +381,7 @@ private fun LibraryTab(
     onApproveAi: () -> Unit,
     onDismissAiPrompt: () -> Unit,
     onSearchChange: (String) -> Unit,
+    onToggleMusicFilter: (Boolean) -> Unit,
     onSongClick: (Song) -> Unit,
     onPlaySong: (Song) -> Unit,
     onStartScanClick: () -> Unit
@@ -412,6 +426,66 @@ private fun LibraryTab(
                 unfocusedBorderColor = DarkSurfaceBorder
             )
         )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Intelligent Classification Filter Chips: Music Tracks vs All Audio
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Music Tracks Chip
+            Surface(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onToggleMusicFilter(true) },
+                color = if (filterMusicOnly) PrimaryCyan.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (filterMusicOnly) PrimaryCyan else DarkSurfaceBorder
+                )
+            ) {
+                Text(
+                    text = "🎵 Songs ($musicSongCount)",
+                    fontSize = 12.sp,
+                    fontWeight = if (filterMusicOnly) FontWeight.Bold else FontWeight.Normal,
+                    color = if (filterMusicOnly) PrimaryCyan else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // All Audio Chip
+            Surface(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onToggleMusicFilter(false) },
+                color = if (!filterMusicOnly) SecondaryViolet.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (!filterMusicOnly) SecondaryViolet else DarkSurfaceBorder
+                )
+            ) {
+                Text(
+                    text = "📁 All Audio ($totalAudioCount)",
+                    fontSize = 12.sp,
+                    fontWeight = if (!filterMusicOnly) FontWeight.Bold else FontWeight.Normal,
+                    color = if (!filterMusicOnly) SecondaryViolet else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+
+            if (filterMusicOnly && nonMusicCount > 0) {
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = "$nonMusicCount non-songs filtered",
+                    fontSize = 10.sp,
+                    color = TertiaryAmber,
+                    maxLines = 1
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(10.dp))
 

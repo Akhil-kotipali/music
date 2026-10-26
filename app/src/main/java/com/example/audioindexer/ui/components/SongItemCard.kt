@@ -139,6 +139,31 @@ fun SongItemCard(
                                 }
                             }
                         }
+
+                        // Intelligent non-music classification badge
+                        if (!song.isMusic) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(TertiaryAmber.copy(alpha = 0.2f))
+                                    .border(1.dp, TertiaryAmber.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = when (song.audioType) {
+                                        "VOICE_NOTE" -> "VOICE NOTE"
+                                        "RINGTONE_ALARM" -> "RINGTONE"
+                                        "CALL_RECORDING" -> "RECORDING"
+                                        "PODCAST_SPEECH" -> "PODCAST"
+                                        else -> "AUDIO"
+                                    },
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TertiaryAmber
+                                )
+                            }
+                        }
                     }
 
                     Text(

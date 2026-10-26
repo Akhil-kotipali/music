@@ -101,6 +101,29 @@ fun StagedSongItemCard(
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    if (!stagedSong.isMusic) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(TertiaryAmber.copy(alpha = 0.25f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = when (stagedSong.audioType) {
+                                    "VOICE_NOTE" -> "VOICE NOTE"
+                                    "RINGTONE_ALARM" -> "RINGTONE"
+                                    "CALL_RECORDING" -> "RECORDING"
+                                    "PODCAST_SPEECH" -> "PODCAST"
+                                    else -> "NON-MUSIC"
+                                },
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TertiaryAmber
+                            )
+                        }
+                    }
                 }
 
                 Text(

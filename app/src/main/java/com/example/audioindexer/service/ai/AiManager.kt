@@ -61,19 +61,43 @@ class AiManager(
 
         const val STRICT_SYSTEM_PROMPT =
             "Categorize this song into exactly one primary mood/genre tag from this list: Love, Motivational, Sad, High Energy, Relaxed, Focus."
+
+        const val MAX_PART_SIZE = 4
+        const val MAX_PROMPT_CHARS = 2600
+
+        fun isLengthyPromptError(error: String?): Boolean {
+            if (error == null) return false
+            val lower = error.lowercase(Locale.ROOT)
+            return lower.contains("too long") ||
+                    lower.contains("lengthy") ||
+                    lower.contains("too much lengthy") ||
+                    lower.contains("context_length_exceeded") ||
+                    lower.contains("maximum context length") ||
+                    lower.contains("payload size exceeds") ||
+                    lower.contains("request entity too large") ||
+                    lower.contains("413") ||
+                    lower.contains("prompt length") ||
+                    (lower.contains("token") && (lower.contains("exceed") || lower.contains("limit") || lower.contains("maximum")))
+        }
     }
 
     /**
      * Categorizes a single song by extracting metadata and a 30-second lyric/audio snippet.
-     * Automatically handles key rotation and rate limit fallbacks.
+     * Automatically handles key rotation, rate limit fallbacks, and prompt length condensation.
      */
-    suspend fun categorizeSong(song: Song): String? = withContext(Dispatchers.IO) {
+    suspend fun categorizeSong(song: Song, maxSnippetChars: Int = 400): String? = withContext(Dispatchers.IO) {
+        // Disallow non-music files (voice notes, ringtones) from AI categorization
+        if (!song.isMusic) {
+            return@withContext null
+        }
+
         val audioFile = File(song.filePath)
-        val snippet = if (!song.lyricsSnippet.isNullOrBlank() && !song.lyricsSnippet.startsWith("Placeholder")) {
+        val rawSnippet = if (!song.lyricsSnippet.isNullOrBlank() && !song.lyricsSnippet.startsWith("Placeholder")) {
             song.lyricsSnippet
         } else {
             AudioSnippetExtractor.extractThirtySecondSnippet(audioFile)
         }
+        val snippet = if (rawSnippet.length > maxSnippetChars) rawSnippet.take(maxSnippetChars) + "... [truncated]" else rawSnippet
 
         val prompt = buildString {
             appendLine("Title: ${song.title}")
@@ -85,7 +109,6 @@ class AiManager(
             appendLine("Instruction: $STRICT_SYSTEM_PROMPT Reply ONLY with the chosen tag name.")
         }
 
-        // Fetch candidate active keys, prioritizing non-rate-limited keys
         val activeKeys = keyConfigDao.getAllActiveKeys()
         if (activeKeys.isEmpty()) {
             logDao.insert(
@@ -108,7 +131,6 @@ class AiManager(
 
         var matchedCategory: String? = null
 
-        // Try keys in sequence; rotate automatically if rate-limited or error
         for (key in activeKeys) {
             val startTime = System.currentTimeMillis()
             try {
@@ -118,7 +140,6 @@ class AiManager(
 
                 if (parsedCategory != null) {
                     matchedCategory = parsedCategory
-                    // Update key usage stats
                     keyConfigDao.update(
                         key.copy(
                             isRateLimited = false,
@@ -128,10 +149,8 @@ class AiManager(
                         )
                     )
 
-                    // Update song table in Room
                     songDao.updateAiCategory(song.id, parsedCategory)
 
-                    // Log success
                     logDao.insert(
                         AiLog(
                             provider = key.provider,
@@ -148,7 +167,6 @@ class AiManager(
                     )
                     break
                 } else {
-                    // Response did not contain a valid category tag
                     logDao.insert(
                         AiLog(
                             provider = key.provider,
@@ -165,9 +183,29 @@ class AiManager(
                         )
                     )
                 }
+            } catch (e: LengthyPromptException) {
+                // If single song prompt was flagged as too lengthy, retry once with highly condensed snippet
+                if (maxSnippetChars > 120) {
+                    return@withContext categorizeSong(song, maxSnippetChars = 100)
+                }
+                val duration = System.currentTimeMillis() - startTime
+                logDao.insert(
+                    AiLog(
+                        provider = key.provider,
+                        model = resolveModel(key),
+                        apiKeyMasked = key.maskedKey,
+                        requestPrompt = prompt,
+                        responseBody = e.message ?: "Prompt too lengthy",
+                        extractedCategory = null,
+                        status = "LENGTHY_PROMPT",
+                        durationMs = duration,
+                        songId = song.id,
+                        songTitle = song.title,
+                        errorMessage = "Prompt too lengthy: ${e.message}"
+                    )
+                )
             } catch (e: RateLimitException) {
                 val duration = System.currentTimeMillis() - startTime
-                // Flag key as rate-limited and rotate to next key
                 keyConfigDao.updateRateLimit(key.id, true, System.currentTimeMillis() + 60_000L)
                 logDao.insert(
                     AiLog(
@@ -186,6 +224,9 @@ class AiManager(
                 )
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - startTime
+                if (isLengthyPromptError(e.message) && maxSnippetChars > 120) {
+                    return@withContext categorizeSong(song, maxSnippetChars = 100)
+                }
                 keyConfigDao.update(
                     key.copy(
                         errorCount = key.errorCount + 1,
@@ -214,18 +255,54 @@ class AiManager(
     }
 
     /**
-     * Batch categorizes multiple songs, reporting progress callbacks.
+     * Batch categorizes multiple songs.
+     * If the prompt is too lengthy or the API returns a lengthy prompt error,
+     * dynamically breaks the list into parts and sends parts only.
      */
     suspend fun batchCategorize(
         songs: List<Song>,
         onProgress: (current: Int, total: Int, lastResult: CategorizationResult?) -> Unit
     ): Int = withContext(Dispatchers.IO) {
-        var processedCount = 0
-        for ((index, song) in songs.withIndex()) {
-            val startTime = System.currentTimeMillis()
-            val category = categorizeSong(song)
-            val duration = System.currentTimeMillis() - startTime
+        // Only categorize genuine music tracks; exclude voice notes and ringtones
+        val musicSongs = songs.filter { it.isMusic }
+        if (musicSongs.isEmpty()) {
+            return@withContext 0
+        }
 
+        var processedCount = 0
+        var totalReported = 0
+        val totalSongs = musicSongs.size
+
+        // Break into initial parts
+        val initialParts = musicSongs.chunked(MAX_PART_SIZE)
+
+        for (part in initialParts) {
+            val partResults = processPartWithAdaptiveSplitting(part)
+            for (res in partResults) {
+                totalReported++
+                if (res != null) {
+                    processedCount++
+                }
+                onProgress(totalReported, totalSongs, res)
+            }
+        }
+
+        processedCount
+    }
+
+    /**
+     * Recursively processes a part of songs.
+     * If prompt length exceeds budget or the API throws a LengthyPromptException,
+     * dynamically breaks the part into halves and sends each part separately.
+     */
+    private suspend fun processPartWithAdaptiveSplitting(part: List<Song>): List<CategorizationResult?> {
+        if (part.isEmpty()) return emptyList()
+
+        if (part.size == 1) {
+            val song = part.first()
+            val start = System.currentTimeMillis()
+            val category = categorizeSong(song)
+            val duration = System.currentTimeMillis() - start
             val result = category?.let {
                 CategorizationResult(
                     songId = song.id,
@@ -235,13 +312,184 @@ class AiManager(
                     durationMs = duration
                 )
             }
-
-            if (category != null) {
-                processedCount++
-            }
-            onProgress(index + 1, songs.size, result)
+            return listOf(result)
         }
-        processedCount
+
+        // Build multi-song prompt for the part
+        val partPrompt = buildPartPrompt(part)
+
+        // Check if pre-emptive length exceeds safety threshold
+        if (partPrompt.length > MAX_PROMPT_CHARS) {
+            // Break into smaller parts and send parts only
+            val subParts = part.chunked(maxOf(1, part.size / 2))
+            logDao.insert(
+                AiLog(
+                    provider = "SYSTEM",
+                    model = "adaptive-chunker",
+                    apiKeyMasked = "N/A",
+                    requestPrompt = "Part of ${part.size} songs has prompt length ${partPrompt.length} chars (exceeds budget $MAX_PROMPT_CHARS).",
+                    responseBody = "Breaking list into ${subParts.size} parts and sending parts only.",
+                    extractedCategory = null,
+                    status = "PROMPT_SPLIT",
+                    durationMs = 0L,
+                    errorMessage = "Prompt too lengthy. Dynamically split into sub-parts of ${subParts.first().size} songs."
+                )
+            )
+            val combinedResults = mutableListOf<CategorizationResult?>()
+            for (subPart in subParts) {
+                combinedResults.addAll(processPartWithAdaptiveSplitting(subPart))
+            }
+            return combinedResults
+        }
+
+        // Attempt sending part to active AI key
+        val activeKeys = keyConfigDao.getAllActiveKeys()
+        if (activeKeys.isEmpty()) {
+            return part.map { null }
+        }
+
+        var partSuccess = false
+        val results = mutableListOf<CategorizationResult?>()
+
+        for (key in activeKeys) {
+            val start = System.currentTimeMillis()
+            try {
+                val responseText = executeAiRequest(key, partPrompt)
+                val duration = System.currentTimeMillis() - start
+
+                val parsedMap = parsePartResponse(responseText, part)
+                if (parsedMap.isNotEmpty()) {
+                    keyConfigDao.update(
+                        key.copy(
+                            isRateLimited = false,
+                            lastUsedTime = System.currentTimeMillis(),
+                            errorCount = 0,
+                            lastError = null
+                        )
+                    )
+
+                    logDao.insert(
+                        AiLog(
+                            provider = key.provider,
+                            model = resolveModel(key),
+                            apiKeyMasked = key.maskedKey,
+                            requestPrompt = partPrompt,
+                            responseBody = responseText,
+                            extractedCategory = "${parsedMap.size} songs categorized in part",
+                            status = "SUCCESS",
+                            durationMs = duration
+                        )
+                    )
+
+                    for (song in part) {
+                        val cat = parsedMap[song.id]
+                        if (cat != null) {
+                            songDao.updateAiCategory(song.id, cat)
+                            results.add(
+                                CategorizationResult(
+                                    songId = song.id,
+                                    title = song.title,
+                                    category = cat,
+                                    provider = key.provider,
+                                    durationMs = duration / part.size
+                                )
+                            )
+                        } else {
+                            // If a song wasn't parsed in the batch response, categorize individually
+                            val individualCat = categorizeSong(song)
+                            results.add(
+                                individualCat?.let {
+                                    CategorizationResult(song.id, song.title, it, key.provider, 0L)
+                                }
+                            )
+                        }
+                    }
+                    partSuccess = true
+                    break
+                }
+            } catch (e: LengthyPromptException) {
+                // The API specifically stated prompt was too lengthy!
+                // Break into smaller parts and send parts only!
+                val subParts = part.chunked(maxOf(1, part.size / 2))
+                logDao.insert(
+                    AiLog(
+                        provider = key.provider,
+                        model = resolveModel(key),
+                        apiKeyMasked = key.maskedKey,
+                        requestPrompt = "API returned prompt too lengthy: ${e.message}",
+                        responseBody = "Breaking list into ${subParts.size} parts and sending parts only.",
+                        extractedCategory = null,
+                        status = "PROMPT_SPLIT",
+                        durationMs = System.currentTimeMillis() - start,
+                        errorMessage = "API key reported prompt is too lengthy. Split into parts of size ${subParts.first().size}."
+                    )
+                )
+                val combined = mutableListOf<CategorizationResult?>()
+                for (subPart in subParts) {
+                    combined.addAll(processPartWithAdaptiveSplitting(subPart))
+                }
+                return combined
+            } catch (e: RateLimitException) {
+                keyConfigDao.updateRateLimit(key.id, true, System.currentTimeMillis() + 60_000L)
+            } catch (e: Exception) {
+                if (isLengthyPromptError(e.message)) {
+                    val subParts = part.chunked(maxOf(1, part.size / 2))
+                    val combined = mutableListOf<CategorizationResult?>()
+                    for (subPart in subParts) {
+                        combined.addAll(processPartWithAdaptiveSplitting(subPart))
+                    }
+                    return combined
+                }
+            }
+        }
+
+        // If part batch failed across keys, fall back to individual song processing
+        if (!partSuccess) {
+            return part.map { song ->
+                val cat = categorizeSong(song)
+                cat?.let { CategorizationResult(song.id, song.title, it, "AI", 0L) }
+            }
+        }
+
+        return results
+    }
+
+    private fun buildPartPrompt(songs: List<Song>): String = buildString {
+        appendLine("Instruction: Categorize each numbered song below into exactly one primary mood/genre tag from: Love, Motivational, Sad, High Energy, Relaxed, Focus.")
+        appendLine("Format your response strictly line by line with the song ID and chosen tag:")
+        appendLine("[ID: <number>]: <Tag>")
+        appendLine()
+        for (song in songs) {
+            val audioFile = File(song.filePath)
+            val snippet = if (!song.lyricsSnippet.isNullOrBlank() && !song.lyricsSnippet.startsWith("Placeholder")) {
+                song.lyricsSnippet
+            } else {
+                AudioSnippetExtractor.extractThirtySecondSnippet(audioFile)
+            }
+            val shortSnippet = if (snippet.length > 150) snippet.take(150) + "..." else snippet
+            appendLine("[ID: ${song.id}] Title: \"${song.title}\" | Artist: \"${song.artist}\" | 30s Snippet: $shortSnippet")
+        }
+    }
+
+    private fun parsePartResponse(responseText: String, songs: List<Song>): Map<Long, String> {
+        val results = mutableMapOf<Long, String>()
+        val lines = responseText.lines()
+
+        for (song in songs) {
+            val idPattern = Regex("(?i)\\[?ID:?\\s*${song.id}\\]?[:\\s-]+([A-Za-z\\s]+)")
+            for (line in lines) {
+                val match = idPattern.find(line)
+                if (match != null) {
+                    val candidate = match.groupValues[1].trim()
+                    val parsed = parseCategory(candidate)
+                    if (parsed != null) {
+                        results[song.id] = parsed
+                        break
+                    }
+                }
+            }
+        }
+        return results
     }
 
     /**
@@ -306,6 +554,10 @@ class AiManager(
             throw RateLimitException("Gemini Rate Limit Exceeded (HTTP 429): $responseBody")
         }
 
+        if (response.code == 413 || isLengthyPromptError(responseBody)) {
+            throw LengthyPromptException("Gemini Prompt Too Lengthy (HTTP ${response.code}): $responseBody")
+        }
+
         if (!response.isSuccessful) {
             throw Exception("Gemini API Error (HTTP ${response.code}): $responseBody")
         }
@@ -340,7 +592,7 @@ class AiManager(
             }
             put("messages", messages)
             put("temperature", 0.1)
-            put("max_tokens", 30)
+            put("max_tokens", 80)
         }
 
         return callOpenAiCompatible(url, key.apiKey, jsonBody, "Groq")
@@ -364,7 +616,7 @@ class AiManager(
             }
             put("messages", messages)
             put("temperature", 0.1)
-            put("max_tokens", 30)
+            put("max_tokens", 80)
         }
 
         return callOpenAiCompatible(url, key.apiKey, jsonBody, "OpenAI")
@@ -383,6 +635,10 @@ class AiManager(
 
         if (response.code == 429) {
             throw RateLimitException("$providerName Rate Limit Exceeded (HTTP 429): $responseBody")
+        }
+
+        if (response.code == 413 || isLengthyPromptError(responseBody)) {
+            throw LengthyPromptException("$providerName Prompt Too Lengthy (HTTP ${response.code}): $responseBody")
         }
 
         if (!response.isSuccessful) {
@@ -466,3 +722,4 @@ class AiManager(
 }
 
 class RateLimitException(message: String) : Exception(message)
+class LengthyPromptException(message: String) : Exception(message)

@@ -25,7 +25,7 @@ import com.example.audioindexer.data.model.StagedSong
         Playlist::class,
         PlaylistSongMap::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AudioDatabase : RoomDatabase() {

@@ -23,7 +23,9 @@ import androidx.room.PrimaryKey
         Index(value = ["title"]),
         Index(value = ["artist"]),
         Index(value = ["album"]),
-        Index(value = ["ai_category"])
+        Index(value = ["ai_category"]),
+        Index(value = ["is_music"]),
+        Index(value = ["audio_type"])
     ]
 )
 data class Song(
@@ -36,6 +38,10 @@ data class Song(
     val lyricsSnippet: String? = null,
     @ColumnInfo(name = "ai_category")
     val aiCategory: String? = null,
+    @ColumnInfo(name = "is_music", defaultValue = "1")
+    val isMusic: Boolean = true,
+    @ColumnInfo(name = "audio_type", defaultValue = "'MUSIC'")
+    val audioType: String = "MUSIC",
     val durationMs: Long = 0L,
     val fileSize: Long = 0L,
     val extension: String = "",

@@ -24,8 +24,14 @@ The application features deep internal & SD card audio discovery, autonomous bac
   - Automatically queries the active AI provider with the strict system prompt:
     > *"Categorize this song into exactly one primary mood/genre tag from this list: Love, Motivational, Sad, High Energy, Relaxed, Focus."*
   - Stores the parsed tag into the Room database `songs` table under `ai_category`.
+- **Adaptive Part-Splitting on Lengthy Prompts**:
+  - Automatically handles cases where the AI API provider reports prompts as too lengthy or exceeds context length limits (HTTP 413, `context_length_exceeded`, `payload size exceeds`, etc.).
+  - Dynamically partitions the batch into smaller parts (halves down to single items) and sends parts only. If a single item's snippet is still oversized, it condenses and truncates the snippet safely before re-sending.
+- **Intelligent Song vs. Non-Song Distinction**:
+  - [AudioClassifier.kt](file:///c:/Users/krish/OneDrive/Desktop/new%20app/app/src/main/java/com/example/audioindexer/util/AudioClassifier.kt): Intelligently analyzes directory paths, regex filename patterns, duration, file size, and ID3 tags to filter genuine musical tracks from WhatsApp voice notes, Telegram voice memos, phone call recordings, system ringtones, alarms, notification beeps, and audiobooks.
+  - Non-songs are isolated with classification badges (`[VOICE NOTE]`, `[RINGTONE]`, `[RECORDING]`, `[PODCAST]`) and excluded from AI categorization and music playback queues.
 - **AI Audit Logging & Text Export**:
-  - Logs every AI call: timestamp, provider, model, latency (ms), request prompt, response body, extracted category, and errors.
+  - Logs every AI call: timestamp, provider, model, latency (ms), request prompt, response body, extracted category, prompt split events, and errors.
   - Full CRUD operations in the Compose UI: view detailed prompts/responses, delete single logs, and clear history.
   - **Export to .TXT File**: Generates formatted audit logs and launches the Android system share sheet via `FileProvider`.
 

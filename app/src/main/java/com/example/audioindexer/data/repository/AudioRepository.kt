@@ -57,6 +57,8 @@ class AudioRepository(
             album = stagedSong.album,
             lyricsSnippet = stagedSong.lyricsSnippet ?: "Lyrics snippet: [${stagedSong.title}] - not yet parsed.",
             aiCategory = stagedSong.aiCategory,
+            isMusic = stagedSong.isMusic,
+            audioType = stagedSong.audioType,
             durationMs = stagedSong.durationMs,
             fileSize = stagedSong.fileSize,
             extension = stagedSong.extension,
