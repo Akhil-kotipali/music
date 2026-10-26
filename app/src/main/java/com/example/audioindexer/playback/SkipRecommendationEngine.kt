@@ -55,7 +55,7 @@ class SkipRecommendationEngine(
 ) {
     companion object {
         const val HARD_SKIP_THRESHOLD_MS = 15_000L // 15 seconds
-        const val RAPID_SKIP_WINDOW_MS = 15_000L   // 15-second rolling window
+        const val RAPID_SKIP_WINDOW_MS = 20_000L   // 20-second rolling window for rapid skips
         const val PRUNE_MIN_APPEARANCES = 5        // Minimum 5 appearances
         const val PRUNE_SKIP_RATIO = 0.80          // 80% skip-to-play ratio threshold
 
@@ -107,12 +107,8 @@ class SkipRecommendationEngine(
             }
         }
 
-        // Check if skips indicate Mood Irrelevance (same mood skipped 2+ times)
-        val isMoodMismatch = !skippedCategory.isNullOrBlank() &&
-                recentSkippedCategories.takeLast(3).count { it.equals(skippedCategory, ignoreCase = true) } >= 2
-
-        // True Hunting Mode: 5+ rapid skips across diverse categories in under 15 seconds
-        if (rapidSkipTimestamps.size >= 5 && !isMoodMismatch) {
+        // Check Hunting Mode: 4+ skips in rapid succession
+        if (rapidSkipTimestamps.size >= 4) {
             isHuntingMode = true
             _engineStatus.value = SkipEngineStatus(
                 mode = EngineStateMode.HUNTING_MODE,
@@ -136,22 +132,22 @@ class SkipRecommendationEngine(
                 recordSkipAndCheckPrune(playlistId, currentSong)
             }
 
-            // 1. Mood Mismatch handling: User is rejecting this specific mood, not hunting
-            if (isMoodMismatch && !skippedCategory.isNullOrBlank()) {
-                val reordered = applyPivotAway(upcomingQueue, skippedCategory)
+            // Short-Term Pivot & Mood Mismatch Behaviors
+            return if (consecutiveHardSkips >= 3 && !skippedCategory.isNullOrBlank()) {
+                // Consecutive hard skip >= 3: Mood Mismatch (user strongly rejecting this mood)
+                val contrasted = CONTRASTED_CATEGORIES[skippedCategory] ?: emptyList()
+                val reordered = applyContrastedFilter(upcomingQueue, contrasted, skippedCategory)
+
                 _engineStatus.value = SkipEngineStatus(
                     mode = EngineStateMode.MOOD_MISMATCH,
                     consecutiveHardSkips = consecutiveHardSkips,
                     isHuntingMode = false,
                     lastSkippedCategory = skippedCategory,
-                    lastActionDescription = "Mood Adjustment: Skipped '$skippedCategory' (irrelevant to mood). Reprioritizing alternative moods."
+                    lastActionDescription = "Mood Adjustment: Repeated skips in '$skippedCategory' (irrelevant to mood). Reprioritizing alternative moods."
                 )
-                return reordered
-            }
-
-            // 2. Short-Term Pivot Behaviors
-            return if (consecutiveHardSkips >= 2 && !skippedCategory.isNullOrBlank()) {
-                // Consecutive hard skip >= 2: Contrast
+                reordered
+            } else if (consecutiveHardSkips == 2 && !skippedCategory.isNullOrBlank()) {
+                // Consecutive hard skip == 2: Contrast
                 val contrasted = CONTRASTED_CATEGORIES[skippedCategory] ?: emptyList()
                 val reordered = applyContrastedFilter(upcomingQueue, contrasted, skippedCategory)
 
@@ -212,6 +208,24 @@ class SkipRecommendationEngine(
         if (playlistId != null) {
             recordPlay(playlistId, song)
         }
+    }
+
+    /**
+     * Explicitly signals that current recommendations do not fit the user's mood.
+     * Deprioritizes [irrelevantCategory] and surfaces alternative moods.
+     */
+    fun reportMoodMismatch(upcomingQueue: List<Song>, irrelevantCategory: String?): List<Song> {
+        val cat = irrelevantCategory ?: lastSkippedCategory ?: return upcomingQueue
+        val contrasted = CONTRASTED_CATEGORIES[cat] ?: emptyList()
+        val reordered = applyContrastedFilter(upcomingQueue, contrasted, cat)
+        _engineStatus.value = SkipEngineStatus(
+            mode = EngineStateMode.MOOD_MISMATCH,
+            consecutiveHardSkips = consecutiveHardSkips,
+            isHuntingMode = false,
+            lastSkippedCategory = cat,
+            lastActionDescription = "Mood Adjustment: Skipped '$cat' (irrelevant to mood). Reprioritizing alternative moods."
+        )
+        return reordered
     }
 
     private fun recordPlay(playlistId: Long, song: Song) {

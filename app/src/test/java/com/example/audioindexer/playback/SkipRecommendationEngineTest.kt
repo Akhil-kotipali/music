@@ -256,21 +256,46 @@ class SkipRecommendationEngineTest {
         val queue = listOf(
             createSong(1, "Sad 1", "Sad"),
             createSong(2, "Sad 2", "Sad"),
-            createSong(3, "Happy 1", "High Energy"),
-            createSong(4, "Study 1", "Focus")
+            createSong(3, "Sad 3", "Sad"),
+            createSong(4, "Happy 1", "High Energy"),
+            createSong(5, "Study 1", "Focus")
         )
 
-        // User skips first Sad song
+        // User skips first Sad song (Short term pivot)
         engine.onSkipClicked(1000L, queue[0], null, queue.subList(1, queue.size))
+        assertEquals(EngineStateMode.SHORT_TERM_PIVOT, engine.engineStatus.value.mode)
 
-        // User skips second Sad song (two consecutive Sad songs skipped)
-        val reordered = engine.onSkipClicked(1500L, queue[1], null, queue.subList(2, queue.size))
+        // User skips second Sad song (Contrasted filter)
+        engine.onSkipClicked(1500L, queue[1], null, queue.subList(2, queue.size))
+        assertEquals(EngineStateMode.CONTRASTED_FILTER, engine.engineStatus.value.mode)
+
+        // User skips third Sad song (Recognizes Mood Mismatch and deeply pivots recommendations)
+        val reordered = engine.onSkipClicked(2000L, queue[2], null, queue.subList(3, queue.size))
 
         // Should enter MOOD_MISMATCH mode and pivot away from Sad, not enter hunting mode
         assertEquals(EngineStateMode.MOOD_MISMATCH, engine.engineStatus.value.mode)
-        assertTrue(engine.engineStatus.value.lastActionDescription.contains("Mood mismatch"))
+        assertTrue(engine.engineStatus.value.lastActionDescription.contains("Mood Adjustment"))
 
-        // First track in reordered upcoming queue should be a non-Sad track
+        // First track in reordered upcoming queue should be a non-Sad track (contrasted)
+        assertEquals("High Energy", reordered.first().aiCategory)
+    }
+
+    @Test
+    fun testReportMoodMismatch_directlySurfacesAlternativeMoods() {
+        val mockDao = MockPlaylistDao()
+        val engine = SkipRecommendationEngine(
+            playlistDao = mockDao,
+            scope = CoroutineScope(Dispatchers.Unconfined)
+        )
+
+        val queue = listOf(
+            createSong(1, "Sad 1", "Sad"),
+            createSong(2, "Happy 1", "High Energy"),
+            createSong(3, "Focus 1", "Focus")
+        )
+
+        val reordered = engine.reportMoodMismatch(queue, "Sad")
+        assertEquals(EngineStateMode.MOOD_MISMATCH, engine.engineStatus.value.mode)
         assertEquals("High Energy", reordered.first().aiCategory)
     }
 }
